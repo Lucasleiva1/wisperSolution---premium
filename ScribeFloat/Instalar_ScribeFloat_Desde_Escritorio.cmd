@@ -1,9 +1,9 @@
 @echo off
 setlocal
 chcp 65001 >nul
-set "SCRIPT=C:\Users\jaell\Desktop\wisperSolution\ScribeFloat\Instalar_ScribeFloat_Python.ps1"
-set "LOG=%USERPROFILE%\Desktop\ScribeFloat_instalacion.log"
-echo Instalando ScribeFloat... > "%LOG%"
+set "SCRIPT=%~dp0Instalar_ScribeFloat_Python.ps1"
+set "LOG=%USERPROFILE%\Desktop\ScribeFloat_Premium_instalacion.log"
+echo Instalando ScribeFloat Premium... > "%LOG%"
 echo Script: %SCRIPT% >> "%LOG%"
 echo. >> "%LOG%"
 if not exist "%SCRIPT%" (
@@ -17,12 +17,12 @@ set "INSTALL_EXIT=%ERRORLEVEL%"
 type "%LOG%"
 echo.
 if not "%INSTALL_EXIT%"=="0" (
-    echo ERROR: No se pudo instalar ScribeFloat.
+    echo ERROR: No se pudo instalar ScribeFloat Premium.
     echo Revise el log: "%LOG%"
     pause
     exit /b %INSTALL_EXIT%
 )
-echo OK: ScribeFloat quedo instalado.
-echo Acceso directo: "%USERPROFILE%\Desktop\ScribeFloat.lnk"
+echo OK: ScribeFloat Premium quedo instalado.
+echo Acceso directo: "%USERPROFILE%\Desktop\ScribeFloat Premium.lnk"
 echo Log: "%LOG%"
 pause

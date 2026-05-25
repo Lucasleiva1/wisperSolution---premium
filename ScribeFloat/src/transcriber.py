@@ -1,5 +1,5 @@
 """
-ScribeFloat - Motor de Transcripción Multilingüe
+ScribeFloat Premium - Motor de Transcripcion Multilingue
 Utiliza Faster-Whisper con optimización para GPUs con 4GB VRAM (GTX 1050 Ti).
 """
 
@@ -40,6 +40,7 @@ _add_cuda_dll_directories()
 
 import ctranslate2
 from faster_whisper import WhisperModel
+from app_paths import MODELS_DIR
 
 
 class ScribeEngine:
@@ -94,14 +95,13 @@ class ScribeEngine:
         """Carga el modelo de forma diferida (lazy loading)."""
         if self._model is None:
             print(f"[ScribeEngine] Cargando modelo '{self.model_size}' en {self.device}...")
-            models_dir = os.path.join(os.getenv("LOCALAPPDATA", os.path.expanduser("~")), "ScribeFloat", "models")
-            os.makedirs(models_dir, exist_ok=True)
+            MODELS_DIR.mkdir(parents=True, exist_ok=True)
             try:
                 self._model = WhisperModel(
                     self.model_size,
                     device=self.device,
                     compute_type=self.compute_type,
-                    download_root=models_dir
+                    download_root=str(MODELS_DIR)
                 )
             except Exception as e:
                 if self.device != "cuda":
@@ -113,7 +113,7 @@ class ScribeEngine:
                     self.model_size,
                     device=self.device,
                     compute_type=self.compute_type,
-                    download_root=models_dir
+                    download_root=str(MODELS_DIR)
                 )
             print("[ScribeEngine] Modelo cargado exitosamente.")
         return self._model

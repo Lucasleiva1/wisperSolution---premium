@@ -1,5 +1,5 @@
 """
-ScribeFloat - Captura de Audio y VAD
+ScribeFloat Premium - Captura de Audio y VAD
 Captura audio del micrófono en tiempo real con detección de actividad de voz.
 """
 
@@ -8,6 +8,7 @@ import wave
 from collections import deque
 import numpy as np
 import sounddevice as sd
+from app_paths import TEMP_AUDIO_DIR
 
 # Configuración de audio
 SAMPLE_RATE = 16000       # Whisper necesita 16kHz
@@ -21,6 +22,7 @@ MIN_SPEECH_DURATION = 0.18  # Segundos mínimos de habla para considerar frase
 MAX_SILENCE_DURATION = 0.6 # Segundos de silencio antes de cortar la frase
 MAX_RECORDING_DURATION = 30.0  # Máximo segundos por segmento
 PRE_ROLL_DURATION = 0.25  # Audio previo que evita cortar la primera silaba
+ENVELOPE_POINTS = 64       # Visualizacion liviana para la onda de la UI
 
 
 class AudioCapture:
@@ -57,7 +59,7 @@ class AudioCapture:
         
         # Directorio temporal para archivos de audio
         if temp_dir is None:
-            temp_dir = os.path.join(os.getenv("LOCALAPPDATA", os.path.expanduser("~")), "ScribeFloat", "temp_audio")
+            temp_dir = str(TEMP_AUDIO_DIR)
         self.temp_dir = temp_dir
         os.makedirs(self.temp_dir, exist_ok=True)
         
@@ -93,6 +95,20 @@ class AudioCapture:
         level = min(1.0, rms / 0.01)
         return level
 
+    def _get_envelope(self, audio_block: np.ndarray) -> list[float]:
+        """Reduce el bloque a amplitudes visuales; no interviene en el VAD."""
+        samples = np.abs(audio_block)
+        if not len(samples):
+            return [0.0] * ENVELOPE_POINTS
+
+        chunk_size = max(1, int(np.ceil(len(samples) / ENVELOPE_POINTS)))
+        values = [
+            min(1.0, float(np.mean(samples[i:i + chunk_size])) / 0.012)
+            for i in range(0, len(samples), chunk_size)
+        ]
+        values.extend([0.0] * (ENVELOPE_POINTS - len(values)))
+        return values[:ENVELOPE_POINTS]
+
     def _audio_callback(self, indata, frames, time_info, status):
         """Callback llamado por sounddevice en cada bloque de audio."""
         if status:
@@ -113,7 +129,7 @@ class AudioCapture:
         # Enviar nivel de audio a la UI
         if self.on_level_update:
             level = self._get_level(audio_block)
-            self.on_level_update(level, has_speech)
+            self.on_level_update(level, has_speech, self._get_envelope(audio_block))
 
         if has_speech:
             self._speech_counter += BLOCK_DURATION_MS / 1000.0

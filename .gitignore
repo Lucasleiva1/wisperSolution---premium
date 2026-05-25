@@ -10,11 +10,15 @@ __pycache__/
 
 # Modelos descargados
 ScribeFloat/models/
+ScribeFloat/runtime/
+ScribeFloat/temp_audio/
 
 # Exportaciones temporales
 ScribeFloat/exports/
 ScribeFloat/Output/
 ScribeFloat/build_nuitka/
+ScribeFloat/build_nuitka_premium/
+ScribeFloat/build_nuitka_new/
 
 # Instaladores y artefactos generados
 ScribeFloat/*.exe

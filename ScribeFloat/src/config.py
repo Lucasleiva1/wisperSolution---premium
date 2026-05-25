@@ -1,20 +1,27 @@
-"""ScribeFloat - Configuración persistente."""
+"""ScribeFloat Premium - Configuracion persistente."""
 import json
-import os
 
-appdata_dir = os.path.join(os.getenv("LOCALAPPDATA", os.path.expanduser("~")), "ScribeFloat")
-CONFIG_FILE = os.path.join(appdata_dir, "config.json")
+from app_paths import CONFIG_FILE
 
 DEFAULT_CONFIG = {
     "hotkey": "ctrl+space",
     "language": "es",
     "model_size": "small",
+    "panel_position": None,
+    "capsule_position": None,
+    "last_view": "panel",
+    "capsule_width": 340,
+    "capsule_height": 60,
+    "wave_speed": 55,
+    "wave_response": 62,
+    "wave_amplitude": 25,
+    "wave_detail": 2,
 }
 
 def load_config():
-    if os.path.exists(CONFIG_FILE):
+    if CONFIG_FILE.exists():
         try:
-            with open(CONFIG_FILE, "r") as f:
+            with CONFIG_FILE.open("r", encoding="utf-8") as f:
                 cfg = json.load(f)
             for k, v in DEFAULT_CONFIG.items():
                 cfg.setdefault(k, v)
@@ -24,6 +31,6 @@ def load_config():
     return dict(DEFAULT_CONFIG)
 
 def save_config(cfg):
-    os.makedirs(appdata_dir, exist_ok=True)
-    with open(CONFIG_FILE, "w") as f:
+    CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with CONFIG_FILE.open("w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2)

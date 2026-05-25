@@ -1,5 +1,5 @@
 param(
-    [string]$InstallRoot = "$env:LOCALAPPDATA\ScribeFloat"
+    [string]$InstallRoot = "$env:LOCALAPPDATA\ScribeFloat-Premium"
 )
 
 $ErrorActionPreference = "Stop"
@@ -7,10 +7,10 @@ $ErrorActionPreference = "Stop"
 $SourceRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $AppDir = Join-Path $InstallRoot "app"
 $VenvDir = Join-Path $InstallRoot "venv"
-$StartMenuDir = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\ScribeFloat"
-$DesktopShortcut = Join-Path ([Environment]::GetFolderPath("Desktop")) "ScribeFloat.lnk"
-$StartMenuShortcut = Join-Path $StartMenuDir "ScribeFloat.lnk"
-$LauncherCmd = Join-Path $InstallRoot "Abrir_ScribeFloat.cmd"
+$StartMenuDir = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\ScribeFloat Premium"
+$DesktopShortcut = Join-Path ([Environment]::GetFolderPath("Desktop")) "ScribeFloat Premium.lnk"
+$StartMenuShortcut = Join-Path $StartMenuDir "ScribeFloat Premium.lnk"
+$LauncherCmd = Join-Path $InstallRoot "Abrir_ScribeFloat_Premium.cmd"
 
 function Test-PythonExe($Path) {
     try {
@@ -62,7 +62,7 @@ function Remove-OldCompiledInstall {
     $oldFolders = @(
         "av", "av.libs", "certifi", "ctranslate2", "customtkinter", "faster_whisper",
         "hf_xet", "markupsafe", "numpy", "numpy.libs", "onnxruntime", "PIL", "pygame",
-        "tcl", "tcl8", "tk", "tokenizers", "torch", "yaml", "_sounddevice_data"
+        "PySide6", "shiboken6", "tcl", "tcl8", "tk", "tokenizers", "torch", "yaml", "_sounddevice_data"
     )
 
     $oldFiles = @(
@@ -101,7 +101,19 @@ function Ensure-Venv {
     }
 
     & $venvPython -m pip install --upgrade pip
+    if ($LASTEXITCODE -ne 0) {
+        throw "No se pudo actualizar pip en el entorno de ScribeFloat Premium."
+    }
+
     & $venvPython -m pip install -r (Join-Path $AppDir "requirements.txt")
+    if ($LASTEXITCODE -ne 0) {
+        throw "No se pudieron instalar las dependencias de ScribeFloat Premium."
+    }
+
+    & $venvPython -m pip uninstall --yes customtkinter pystray Pillow | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "No se pudo retirar la interfaz anterior de ScribeFloat Premium."
+    }
 
     return $venvPython
 }
@@ -112,12 +124,12 @@ function New-Shortcut($Path, $Target, $Arguments, $WorkingDirectory) {
     $shortcut.TargetPath = $Target
     $shortcut.Arguments = $Arguments
     $shortcut.WorkingDirectory = $WorkingDirectory
-    $shortcut.Description = "ScribeFloat"
+    $shortcut.Description = "ScribeFloat Premium"
     $shortcut.Save()
 }
 
 Write-Host "=========================================="
-Write-Host " Instalando ScribeFloat Python + GPU"
+Write-Host " Instalando ScribeFloat Premium Python + GPU"
 Write-Host "=========================================="
 Write-Host "Instalacion por usuario: no requiere permisos de administrador."
 
