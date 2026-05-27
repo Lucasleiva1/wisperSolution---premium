@@ -88,8 +88,8 @@ class SettingsPanel(QDialog):
 
         self.setWindowTitle("Configuracion - ScribeFloat Premium")
         self.setWindowFlags(Qt.Dialog | Qt.WindowTitleHint | Qt.WindowCloseButtonHint | Qt.WindowStaysOnTopHint)
-        self.setMinimumSize(460, 600)
-        self.resize(460, 600)
+        self.setMinimumSize(460, 760)
+        self.resize(460, 760)
         self.hotkey_captured.connect(self._finish_capture)
 
         card = QFrame(self)
@@ -136,8 +136,12 @@ class SettingsPanel(QDialog):
         body.addWidget(capsule_label)
         self._visual_sliders = {}
         for title, key, minimum, maximum, suffix in (
-            ("Ancho", "capsule_width", 150, 1000, " px"),
-            ("Alto", "capsule_height", 44, 320, " px"),
+            ("Ancho", "capsule_width", 96, 1000, " px"),
+            ("Alto", "capsule_height", 32, 320, " px"),
+            ("Tamano del microfono", "microphone_size", 55, 180, " %"),
+            ("Tamano del punto", "indicator_size", 55, 180, " %"),
+            ("Ancho de pantalla de voz", "wave_width", 35, 175, " %"),
+            ("Altura de onda", "wave_amplitude", 0, 100, ""),
             ("Velocidad de ondas", "wave_speed", 5, 100, ""),
             ("Reaccion a la voz", "wave_response", 5, 100, ""),
             ("Densidad visual", "wave_detail", 0, 7, ""),

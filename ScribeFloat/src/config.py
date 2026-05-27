@@ -16,6 +16,9 @@ DEFAULT_CONFIG = {
     "wave_response": 62,
     "wave_amplitude": 25,
     "wave_detail": 2,
+    "microphone_size": 100,
+    "indicator_size": 100,
+    "wave_width": 100,
 }
 
 def load_config():

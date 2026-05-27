@@ -592,11 +592,13 @@ class ListeningCapsule(QWidget):
         self.status_text = "LISTO"
         self.recording = False
         self.previewing = False
-        self.stop_confirmation_until = 0.0
         self.wave_speed = 0.15
         self.wave_response = 0.42
         self.wave_amplitude = 1.0
         self.wave_detail = 3
+        self.microphone_scale = 1.0
+        self.indicator_scale = 1.0
+        self.wave_width_scale = 1.0
         self._drag_origin = None
         self.apply_visual_config(config)
 
@@ -674,8 +676,8 @@ class ListeningCapsule(QWidget):
             self.target_envelope.extend([0.0] * (64 - len(self.target_envelope)))
 
     def apply_visual_config(self, config):
-        width = max(150, min(1000, int(config.get("capsule_width", 340))))
-        height = max(44, min(320, int(config.get("capsule_height", 60))))
+        width = max(96, min(1000, int(config.get("capsule_width", 340))))
+        height = max(32, min(320, int(config.get("capsule_height", 60))))
         self.setFixedSize(width, height)
         self._keep_inside_screen()
         self.wave_speed = 0.025 + (max(5, min(100, int(config.get("wave_speed", 55)))) * 0.0022)
@@ -685,6 +687,9 @@ class ListeningCapsule(QWidget):
         normalized_amplitude = amplitude / 100.0
         self.wave_amplitude = 0.025 + ((normalized_amplitude ** 1.35) * 1.2)
         self.wave_detail = max(0, min(7, int(config.get("wave_detail", 2))))
+        self.microphone_scale = max(55, min(180, int(config.get("microphone_size", 100)))) / 100.0
+        self.indicator_scale = max(55, min(180, int(config.get("indicator_size", 100)))) / 100.0
+        self.wave_width_scale = max(35, min(175, int(config.get("wave_width", 100)))) / 100.0
         self.update()
 
     def set_recording(self, active):
@@ -694,10 +699,6 @@ class ListeningCapsule(QWidget):
         if not active:
             self.target_level = 0.0
             self.target_envelope = [0.0] * 64
-
-    def show_stop_confirmation(self):
-        self.stop_confirmation_until = time.monotonic() + 1.0
-        self.update()
 
     def _perform_end_action(self):
         if self.recording:
@@ -834,61 +835,75 @@ class ListeningCapsule(QWidget):
     def _draw_microphone(self, painter, body):
         """Render a stable microphone mark without adding an image asset."""
         center = QPointF(body.left() + 17, body.center().y())
+        painter.save()
+        painter.translate(center)
+        painter.scale(self.microphone_scale, self.microphone_scale)
         painter.setBrush(Qt.NoBrush)
         painter.setPen(QPen(_color("#d9e9ff", 206), 1.25, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
-        capsule = QRectF(center.x() - 3.25, center.y() - 7.5, 6.5, 11.5)
+        capsule = QRectF(-3.25, -7.5, 6.5, 11.5)
         painter.drawRoundedRect(capsule, 3.25, 3.25)
 
         cradle = QPainterPath()
-        cradle.moveTo(center.x() - 6, center.y() - 2)
+        cradle.moveTo(-6, -2)
         cradle.cubicTo(
-            center.x() - 6,
-            center.y() + 5.5,
-            center.x() + 6,
-            center.y() + 5.5,
-            center.x() + 6,
-            center.y() - 2,
+            -6,
+            5.5,
+            6,
+            5.5,
+            6,
+            -2,
         )
         painter.drawPath(cradle)
-        painter.drawLine(QPointF(center.x(), center.y() + 5), QPointF(center.x(), center.y() + 8))
-        painter.drawLine(QPointF(center.x() - 4.5, center.y() + 8), QPointF(center.x() + 4.5, center.y() + 8))
+        painter.drawLine(QPointF(0, 5), QPointF(0, 8))
+        painter.drawLine(QPointF(-4.5, 8), QPointF(4.5, 8))
+        painter.restore()
 
     def _draw_activity_indicator(self, painter, body):
-        confirming_stop = time.monotonic() < self.stop_confirmation_until
+        listening = self.recording
+        scale = self.indicator_scale
         center = QPointF(body.right() - 16, body.center().y())
-        halo_radius = 8.9 if confirming_stop else 7.7
+        halo_radius = (9.2 if listening else 5.2) * scale
         halo = QRadialGradient(center, halo_radius)
-        if confirming_stop:
-            halo.setColorAt(0, _color("#44ff88", 146))
-            halo.setColorAt(0.2, _color("#44ff88", 70))
+        if listening:
+            halo.setColorAt(0, _color("#44ff88", 160))
+            halo.setColorAt(0.22, _color("#44ff88", 74))
             halo.setColorAt(1, _color("#44ff88", 0))
         else:
-            halo.setColorAt(0, _color("#e0efff", 62))
-            halo.setColorAt(0.2, _color("#5d94ff", 32))
-            halo.setColorAt(1, _color("#5d94ff", 0))
+            halo.setColorAt(0, _color("#e0efff", 36))
+            halo.setColorAt(1, _color("#e0efff", 0))
         painter.setPen(Qt.NoPen)
         painter.setBrush(halo)
         painter.drawEllipse(center, halo_radius, halo_radius)
 
         painter.setBrush(Qt.NoBrush)
-        if confirming_stop:
-            painter.setPen(QPen(_color("#44ff88", 88), 0.85))
-            painter.drawEllipse(center, 7.8, 7.8)
-            painter.setPen(QPen(_color("#44ff88", 44), 0.8))
-            painter.drawEllipse(center, 10.8, 10.8)
+        if listening:
+            painter.setPen(QPen(_color("#44ff88", 92), 0.85))
+            painter.drawEllipse(center, 7.8 * scale, 7.8 * scale)
+            painter.setPen(QPen(_color("#44ff88", 46), 0.8))
+            painter.drawEllipse(center, 10.8 * scale, 10.8 * scale)
         else:
-            painter.setPen(QPen(_color("#15ddff", 34), 0.85))
-            painter.drawEllipse(center, 7.2, 7.2)
-            painter.setPen(QPen(_color("#5d94ff", 22), 0.8))
-            painter.drawEllipse(center, 10.2, 10.2)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(_color("#07131f", 220))
+            painter.drawEllipse(center, 3.25 * scale, 3.25 * scale)
 
         painter.setPen(Qt.NoPen)
-        painter.setBrush(_color("#44ff88", 238) if confirming_stop else _color("#e0efff", 166))
-        painter.drawEllipse(center, 2.8 if confirming_stop else 2.15, 2.8 if confirming_stop else 2.15)
+        painter.setBrush(_color("#44ff88", 238) if listening else _color("#e0efff", 104))
+        radius = (2.85 if listening else 1.75) * scale
+        painter.drawEllipse(center, radius, radius)
 
     def _draw_wave(self, painter, body):
-        left = body.left() + 32
-        right = body.right() - 32
+        left_inset = max(32.0, 22.0 + (10.0 * self.microphone_scale))
+        right_inset = max(32.0, 20.0 + (12.0 * self.indicator_scale))
+        available_left = body.left() + left_inset
+        available_right = body.right() - right_inset
+        available_width = max(2.0, available_right - available_left)
+        expanded_left = body.left() + max(20.0, 17.5 + (5.8 * self.microphone_scale))
+        expanded_right = body.right() - max(22.0, 15.0 + (7.5 * self.indicator_scale))
+        max_width = max(2.0, expanded_right - expanded_left)
+        draw_width = min(max_width, available_width * self.wave_width_scale)
+        midpoint = (available_left + available_right) / 2.0
+        left = midpoint - (draw_width / 2.0)
+        right = left + draw_width
         center = body.center().y() - 2
         samples = 64
         # A few vector curves preserve depth without thousands of particle paints.
@@ -1217,7 +1232,6 @@ class ScribeFloatController(QObject):
         self._paste_after_stop = True
         self._set_state(UiState.FINALIZING, "Procesando transcripcion...")
         self.capsule.set_status("PROCESANDO...")
-        self.capsule.show_stop_confirmation()
         if not self.capsule.isVisible():
             self._show_capsule()
         if self.audio_capture:

@@ -11,10 +11,13 @@
     776
   ],
   "last_view": "capsule",
-  "capsule_width": 150,
+  "capsule_width": 141,
   "wave_speed": 19,
   "wave_response": 90,
-  "wave_amplitude": 20,
-  "wave_detail": 3,
-  "capsule_height": 45
+  "wave_amplitude": 18,
+  "wave_detail": 4,
+  "capsule_height": 44,
+  "microphone_size": 86,
+  "indicator_size": 126,
+  "wave_width": 119
 }
