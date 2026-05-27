@@ -65,12 +65,23 @@ class SettingsPanel(QDialog):
 
     hotkey_captured = Signal(str)
 
-    def __init__(self, parent, config, model_summary="", on_save=None, on_preview=None):
+    def __init__(
+        self,
+        parent,
+        config,
+        model_summary="",
+        on_save=None,
+        on_preview=None,
+        on_capture_start=None,
+        on_capture_finish=None,
+    ):
         super().__init__(parent)
         self.config_data = dict(config)
         self._original_config = dict(config)
         self.on_save = on_save
         self.on_preview = on_preview
+        self.on_capture_start = on_capture_start
+        self.on_capture_finish = on_capture_finish
         self._saved = False
         self._capturing_hotkey = False
         self._keyboard_hook = None
@@ -125,8 +136,8 @@ class SettingsPanel(QDialog):
         body.addWidget(capsule_label)
         self._visual_sliders = {}
         for title, key, minimum, maximum, suffix in (
-            ("Ancho", "capsule_width", 150, 560, " px"),
-            ("Alto", "capsule_height", 44, 140, " px"),
+            ("Ancho", "capsule_width", 150, 1000, " px"),
+            ("Alto", "capsule_height", 44, 320, " px"),
             ("Velocidad de ondas", "wave_speed", 5, 100, ""),
             ("Reaccion a la voz", "wave_response", 5, 100, ""),
             ("Densidad visual", "wave_detail", 0, 7, ""),
@@ -240,6 +251,8 @@ class SettingsPanel(QDialog):
         self.hotkey_entry.setText("presiona una combinacion...")
         self.capture_btn.setText("Esperando")
         self.capture_btn.setEnabled(False)
+        if self.on_capture_start:
+            self.on_capture_start()
         try:
             self._keyboard_hook = keyboard.hook(self._capture_event, suppress=False)
         except Exception:
@@ -265,6 +278,8 @@ class SettingsPanel(QDialog):
         self.capture_btn.setText("Capturar")
         self.capture_btn.setEnabled(True)
         self.hotkey_entry.setText(value or self.config_data.get("hotkey", "ctrl+space"))
+        if self.on_capture_finish:
+            self.on_capture_finish()
 
     def _save(self):
         value = self.hotkey_entry.text().strip()

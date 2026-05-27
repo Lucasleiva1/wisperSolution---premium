@@ -4,17 +4,17 @@
   "model_size": "small",
   "panel_position": [
     69,
-    -9
+    0
   ],
   "capsule_position": [
-    650,
-    738
+    529,
+    776
   ],
   "last_view": "capsule",
   "capsule_width": 150,
   "wave_speed": 19,
-  "wave_response": 12,
+  "wave_response": 90,
   "wave_amplitude": 20,
   "wave_detail": 3,
-  "capsule_height": 62
+  "capsule_height": 45
 }

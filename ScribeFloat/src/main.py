@@ -69,6 +69,7 @@ LANGS = {
     "Italiano (it)": "it",
 }
 START_SOUND_DELAY_MS = 350
+WINDOW_TRANSITION_GUARD_MS = 120
 SINGLE_INSTANCE_MUTEX = None
 
 
@@ -163,6 +164,14 @@ def _inside_any_screen(position, size):
         return False
     rect = QRect(int(position[0]), int(position[1]), size.width(), size.height())
     return any(screen.availableGeometry().intersects(rect) for screen in QApplication.screens())
+
+
+def _clamp_widget_to_screen(widget):
+    screen = QApplication.screenAt(widget.frameGeometry().center()) or QApplication.primaryScreen()
+    available = screen.availableGeometry()
+    x = max(available.left(), min(widget.x(), available.right() - widget.width() + 1))
+    y = max(available.top(), min(widget.y(), available.bottom() - widget.height() + 1))
+    widget.move(x, y)
 
 
 def _place_settings_dialog(dialog, anchor):
@@ -269,6 +278,8 @@ class PremiumPanel(QWidget):
         super().__init__()
         self._drag_origin = None
         self._allow_close = False
+        self._ignore_restore_requests = False
+        self._window_transition_token = 0
         self.setWindowTitle("ScribeFloat Premium")
         self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
@@ -489,12 +500,34 @@ class PremiumPanel(QWidget):
     def allow_close(self):
         self._allow_close = True
 
+    def _begin_controlled_window_transition(self):
+        self._window_transition_token += 1
+        token = self._window_transition_token
+        self._ignore_restore_requests = True
+        QTimer.singleShot(
+            WINDOW_TRANSITION_GUARD_MS,
+            lambda: self._end_controlled_window_transition(token),
+        )
+
+    def _end_controlled_window_transition(self, token):
+        if token == self._window_transition_token:
+            self._ignore_restore_requests = False
+
+    def show_minimized_from_controller(self):
+        self._begin_controlled_window_transition()
+        self.showMinimized()
+
+    def show_normal_from_controller(self):
+        self._begin_controlled_window_transition()
+        self.showNormal()
+
     def changeEvent(self, event):
-        if (
+        was_restored = (
             event.type() == QEvent.WindowStateChange
             and event.oldState() & Qt.WindowMinimized
             and not self.isMinimized()
-        ):
+        )
+        if was_restored and not self._ignore_restore_requests:
             self.restore_requested.emit()
         super().changeEvent(event)
 
@@ -559,6 +592,7 @@ class ListeningCapsule(QWidget):
         self.status_text = "LISTO"
         self.recording = False
         self.previewing = False
+        self.stop_confirmation_until = 0.0
         self.wave_speed = 0.15
         self.wave_response = 0.42
         self.wave_amplitude = 1.0
@@ -623,6 +657,16 @@ class ListeningCapsule(QWidget):
             self.controls.move(max(4, self.width() - self.controls.width() - 4), controls_y)
         super().resizeEvent(event)
 
+    def _keep_inside_screen(self):
+        if not self.isVisible():
+            return
+        screen = QApplication.screenAt(self.frameGeometry().center()) or QApplication.primaryScreen()
+        available = screen.availableGeometry()
+        x = max(available.left(), min(self.x(), available.right() - self.width() + 1))
+        y = max(available.top(), min(self.y(), available.bottom() - self.height() + 1))
+        if x != self.x() or y != self.y():
+            self.move(x, y)
+
     def set_audio_visual(self, level, envelope):
         self.target_level = max(0.0, min(1.0, float(level)))
         if envelope:
@@ -630,9 +674,10 @@ class ListeningCapsule(QWidget):
             self.target_envelope.extend([0.0] * (64 - len(self.target_envelope)))
 
     def apply_visual_config(self, config):
-        width = max(150, min(560, int(config.get("capsule_width", 340))))
-        height = max(44, min(140, int(config.get("capsule_height", 60))))
+        width = max(150, min(1000, int(config.get("capsule_width", 340))))
+        height = max(44, min(320, int(config.get("capsule_height", 60))))
         self.setFixedSize(width, height)
+        self._keep_inside_screen()
         self.wave_speed = 0.025 + (max(5, min(100, int(config.get("wave_speed", 55)))) * 0.0022)
         response = max(5, min(100, int(config.get("wave_response", 62))))
         self.wave_response = 0.08 + (response * 0.0052)
@@ -649,6 +694,10 @@ class ListeningCapsule(QWidget):
         if not active:
             self.target_level = 0.0
             self.target_envelope = [0.0] * 64
+
+    def show_stop_confirmation(self):
+        self.stop_confirmation_until = time.monotonic() + 1.0
+        self.update()
 
     def _perform_end_action(self):
         if self.recording:
@@ -776,21 +825,70 @@ class ListeningCapsule(QWidget):
 
         painter.save()
         painter.setClipPath(body_path)
-        glint = QRadialGradient(QPointF(self.width() / 2, body.top() + 6), 45)
-        glint.setColorAt(0, _color("#e0efff", 115))
-        glint.setColorAt(0.09, _color("#5d94ff", 46))
-        glint.setColorAt(1, _color("#5d94ff", 0))
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(glint)
-        painter.drawEllipse(QPointF(self.width() / 2, body.top() + 6), 48, 8)
-
         self._draw_wave(painter, body)
+        self._draw_microphone(painter, body)
+        self._draw_activity_indicator(painter, body)
         painter.restore()
         painter.end()
 
+    def _draw_microphone(self, painter, body):
+        """Render a stable microphone mark without adding an image asset."""
+        center = QPointF(body.left() + 17, body.center().y())
+        painter.setBrush(Qt.NoBrush)
+        painter.setPen(QPen(_color("#d9e9ff", 206), 1.25, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        capsule = QRectF(center.x() - 3.25, center.y() - 7.5, 6.5, 11.5)
+        painter.drawRoundedRect(capsule, 3.25, 3.25)
+
+        cradle = QPainterPath()
+        cradle.moveTo(center.x() - 6, center.y() - 2)
+        cradle.cubicTo(
+            center.x() - 6,
+            center.y() + 5.5,
+            center.x() + 6,
+            center.y() + 5.5,
+            center.x() + 6,
+            center.y() - 2,
+        )
+        painter.drawPath(cradle)
+        painter.drawLine(QPointF(center.x(), center.y() + 5), QPointF(center.x(), center.y() + 8))
+        painter.drawLine(QPointF(center.x() - 4.5, center.y() + 8), QPointF(center.x() + 4.5, center.y() + 8))
+
+    def _draw_activity_indicator(self, painter, body):
+        confirming_stop = time.monotonic() < self.stop_confirmation_until
+        center = QPointF(body.right() - 16, body.center().y())
+        halo_radius = 8.9 if confirming_stop else 7.7
+        halo = QRadialGradient(center, halo_radius)
+        if confirming_stop:
+            halo.setColorAt(0, _color("#44ff88", 146))
+            halo.setColorAt(0.2, _color("#44ff88", 70))
+            halo.setColorAt(1, _color("#44ff88", 0))
+        else:
+            halo.setColorAt(0, _color("#e0efff", 62))
+            halo.setColorAt(0.2, _color("#5d94ff", 32))
+            halo.setColorAt(1, _color("#5d94ff", 0))
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(halo)
+        painter.drawEllipse(center, halo_radius, halo_radius)
+
+        painter.setBrush(Qt.NoBrush)
+        if confirming_stop:
+            painter.setPen(QPen(_color("#44ff88", 88), 0.85))
+            painter.drawEllipse(center, 7.8, 7.8)
+            painter.setPen(QPen(_color("#44ff88", 44), 0.8))
+            painter.drawEllipse(center, 10.8, 10.8)
+        else:
+            painter.setPen(QPen(_color("#15ddff", 34), 0.85))
+            painter.drawEllipse(center, 7.2, 7.2)
+            painter.setPen(QPen(_color("#5d94ff", 22), 0.8))
+            painter.drawEllipse(center, 10.2, 10.2)
+
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(_color("#44ff88", 238) if confirming_stop else _color("#e0efff", 166))
+        painter.drawEllipse(center, 2.8 if confirming_stop else 2.15, 2.8 if confirming_stop else 2.15)
+
     def _draw_wave(self, painter, body):
-        left = body.left() + 27
-        right = body.right() - 27
+        left = body.left() + 32
+        right = body.right() - 32
         center = body.center().y() - 2
         samples = 64
         # A few vector curves preserve depth without thousands of particle paints.
@@ -870,6 +968,7 @@ class ScribeFloatController(QObject):
         self._segment_queue = queue.Queue()
         self._last_hotkey_time = 0.0
         self._hotkey_enabled_after = time.monotonic() + 1.0
+        self._hotkey_suspended = False
         self._closing = False
         self._animations = []
         self._return_to_capsule_after_recording = False
@@ -882,8 +981,17 @@ class ScribeFloatController(QObject):
         self._connect_ui()
         self._restore_positions()
         self._set_state(UiState.LOADING_MODEL, "Preparando modelo...")
-        self.panel.show()
-        _ensure_taskbar_window(self.panel)
+        if self.cfg.get("last_view") == "capsule":
+            self.panel.setAttribute(Qt.WA_ShowWithoutActivating, True)
+            self.panel.setWindowOpacity(0.0)
+            self.panel.show()
+            _ensure_taskbar_window(self.panel)
+            self.capsule.set_status("LISTO")
+            self._show_capsule()
+            self.panel.setWindowOpacity(1.0)
+        else:
+            self.panel.show()
+            _ensure_taskbar_window(self.panel)
 
         self._segment_worker_thread = threading.Thread(target=self._segment_worker, daemon=True)
         self._segment_worker_thread.start()
@@ -928,6 +1036,7 @@ class ScribeFloatController(QObject):
             self.panel.move(int(panel_position[0]), int(panel_position[1]))
         else:
             self.panel.move(74, 70)
+        _clamp_widget_to_screen(self.panel)
 
         capsule_position = self.cfg.get("capsule_position")
         if _inside_any_screen(capsule_position, self.capsule.size()):
@@ -937,6 +1046,7 @@ class ScribeFloatController(QObject):
             x = screen.left() + (screen.width() - self.capsule.width()) // 2
             y = screen.bottom() - self.capsule.height() - 42
             self.capsule.move(x, y)
+        _clamp_widget_to_screen(self.capsule)
 
     def _save_position(self, key, position):
         self.cfg[key] = [position.x(), position.y()]
@@ -1002,6 +1112,8 @@ class ScribeFloatController(QObject):
         self._set_state(UiState.ERROR, f"Error del modelo: {error}")
 
     def _register_hotkey(self):
+        if self._hotkey_suspended:
+            return
         try:
             keyboard.unhook_all_hotkeys()
         except Exception:
@@ -1019,6 +1131,19 @@ class ScribeFloatController(QObject):
             print(f"[Hotkey] Registrado: {hotkey}")
         except Exception as exc:
             self._set_state(UiState.ERROR, f"Error del atajo: {exc}")
+
+    def _suspend_hotkey(self):
+        self._hotkey_suspended = True
+        try:
+            keyboard.unhook_all_hotkeys()
+        except Exception:
+            pass
+
+    def _resume_hotkey(self):
+        if self._closing:
+            return
+        self._hotkey_suspended = False
+        self._register_hotkey()
 
     def _hotkey_triggered(self):
         now = time.monotonic()
@@ -1042,7 +1167,7 @@ class ScribeFloatController(QObject):
         self._start_recording()
 
     def _start_recording(self):
-        self._return_to_capsule_after_recording = self.capsule.isVisible() and not self.panel.isVisible()
+        self._return_to_capsule_after_recording = self.cfg.get("last_view") == "capsule"
         self.capsule.set_previewing(False)
         self._reset_transcription_state(clear_display=True, clear_model_context=True)
         with self._segment_lock:
@@ -1092,6 +1217,7 @@ class ScribeFloatController(QObject):
         self._paste_after_stop = True
         self._set_state(UiState.FINALIZING, "Procesando transcripcion...")
         self.capsule.set_status("PROCESANDO...")
+        self.capsule.show_stop_confirmation()
         if not self.capsule.isVisible():
             self._show_capsule()
         if self.audio_capture:
@@ -1232,7 +1358,7 @@ class ScribeFloatController(QObject):
         self.cfg["last_view"] = "capsule"
         save_config(self.cfg)
         self.panel.setAttribute(Qt.WA_ShowWithoutActivating, True)
-        self.panel.showMinimized()
+        self.panel.show_minimized_from_controller()
         _ensure_taskbar_window(self.panel)
         self.capsule.setWindowOpacity(0.0)
         self.capsule.show()
@@ -1252,7 +1378,7 @@ class ScribeFloatController(QObject):
         if not self.is_recording:
             self.capsule.hide()
         self.panel.setAttribute(Qt.WA_ShowWithoutActivating, passive)
-        self.panel.showNormal()
+        self.panel.show_normal_from_controller()
         _ensure_taskbar_window(self.panel)
         self.panel.raise_()
         if not passive:
@@ -1315,6 +1441,8 @@ class ScribeFloatController(QObject):
             model_summary=summary,
             on_save=self._apply_settings,
             on_preview=self._preview_visual_settings,
+            on_capture_start=self._suspend_hotkey,
+            on_capture_finish=self._resume_hotkey,
         )
         self.settings_dialog.finished.connect(self._settings_closed)
         self.settings_dialog.show()
