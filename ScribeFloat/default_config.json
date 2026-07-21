@@ -1,0 +1,22 @@
+{
+  "hotkey": "ctrl+space",
+  "language": "es",
+  "model_size": "small",
+  "panel_position": null,
+  "capsule_position": null,
+  "last_view": "capsule",
+  "capsule_width": 141,
+  "capsule_height": 44,
+  "wave_speed": 19,
+  "wave_response": 90,
+  "wave_amplitude": 18,
+  "wave_detail": 4,
+  "microphone_size": 86,
+  "indicator_size": 126,
+  "wave_width": 119,
+  "open_button_size": 86,
+  "open_button_width": 79,
+  "open_button_height": 100,
+  "open_button_offset": -9,
+  "open_button_animation_tenths": 2
+}

@@ -4,6 +4,7 @@ import ctypes
 import math
 import os
 import queue
+import subprocess
 import sys
 import threading
 import time
@@ -18,6 +19,7 @@ from PySide6.QtCore import (
     QEvent,
     QPoint,
     QPointF,
+    QParallelAnimationGroup,
     QPropertyAnimation,
     QRect,
     QRectF,
@@ -46,6 +48,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QMessageBox,
     QTextEdit,
     QToolButton,
     QVBoxLayout,
@@ -57,7 +60,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config import load_config, save_config
 from settings_ui import SettingsPanel
 from utils import clean_text, save_transcription
-from app_paths import EXPORTS_DIR
+from app_paths import ASSETS_DIR, EXPORTS_DIR
+from updater import check_for_update, download_update
+from version import APP_VERSION
 
 
 LANGS = {
@@ -305,14 +310,14 @@ class PremiumPanel(QWidget):
         title_group.addWidget(tagline)
         header.addLayout(title_group)
         header.addStretch()
-        for text, callback in (
-            ("-", self.minimize_requested.emit),
-            ("o", self.settings_requested.emit),
-            ("x", self.close_requested.emit),
+        for text, callback, width, tooltip in (
+            ("-", self.minimize_requested.emit, 31, "Minimizar"),
+            ("x", self.close_requested.emit, 31, "Cerrar"),
         ):
             button = QPushButton(text)
             button.setObjectName("windowControl")
-            button.setFixedSize(31, 31)
+            button.setFixedSize(width, 31)
+            button.setToolTip(tooltip)
             button.clicked.connect(callback)
             header.addWidget(button)
         body.addLayout(header)
@@ -391,8 +396,15 @@ class PremiumPanel(QWidget):
         self.hotkey_label.setObjectName("footer")
         footer.addWidget(self.hotkey_label)
         footer.addStretch()
-        footer.addWidget(QLabel("LOCAL  /  PRIVATE"))
-        footer.itemAt(2).widget().setObjectName("footer")
+        self.settings_button = QPushButton("CONFIGURACION")
+        self.settings_button.setObjectName("settingsControl")
+        self.settings_button.setToolTip("Atajo y apariencia de la capsula")
+        self.settings_button.setFixedSize(112, 28)
+        self.settings_button.clicked.connect(self.settings_requested.emit)
+        footer.addWidget(self.settings_button)
+        privacy_label = QLabel("LOCAL  /  PRIVATE")
+        privacy_label.setObjectName("footer")
+        footer.addWidget(privacy_label)
         body.addLayout(footer)
         self.setStyleSheet(self._styles())
 
@@ -431,6 +443,16 @@ class PremiumPanel(QWidget):
             color: #6b7da6; font-size: 14px;
         }
         QPushButton#windowControl:hover { background-color: rgba(40, 58, 96, 130); color: #ffffff; }
+        QPushButton#settingsControl {
+            padding: 0 10px; border-radius: 15px;
+            color: #a8c8ff; font-size: 9px; font-weight: 700;
+            background-color: rgba(13, 27, 55, 210);
+            border: 1px solid rgba(66, 106, 181, 155);
+        }
+        QPushButton#settingsControl:hover {
+            color: #ffffff; border-color: rgba(53, 207, 255, 210);
+            background-color: rgba(20, 43, 82, 235);
+        }
         QPushButton#recordButton {
             color: #ffffff; font-size: 12px; font-weight: 700;
             border: 1px solid rgba(75, 209, 255, 185);
@@ -565,11 +587,23 @@ class PremiumPanel(QWidget):
         self.hotkey_label.setText(f"ATAJO  {hotkey.upper()}")
 
 
+class CapsuleSurface(QWidget):
+    """Front layer that always paints the capsule above its reveal controls."""
+
+    def __init__(self, capsule):
+        super().__init__(capsule)
+        self.capsule = capsule
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        self.capsule._paint_capsule(painter)
+        painter.end()
+
+
 class ListeningCapsule(QWidget):
-    stop_requested = Signal()
-    close_requested = Signal()
     expand_requested = Signal()
-    tune_requested = Signal()
     position_changed = Signal(QPoint)
 
     def __init__(self, config):
@@ -599,53 +633,46 @@ class ListeningCapsule(QWidget):
         self.microphone_scale = 1.0
         self.indicator_scale = 1.0
         self.wave_width_scale = 1.0
+        self._capsule_body_height = 60
+        self._control_zone_height = 34
+        self._open_button_size = 100
+        self._open_button_width = 100
+        self._open_button_height = 100
+        self._open_button_offset = 0
+        self._open_button_animation_ms = 200
         self._drag_origin = None
         self.apply_visual_config(config)
 
-        self.controls = QFrame(self)
+        self.reveal_zone = QFrame(self)
+        self.reveal_zone.setObjectName("capsuleRevealZone")
+        self.reveal_zone.setStyleSheet("QFrame#capsuleRevealZone { background: transparent; border: none; }")
+        self.controls = QFrame(self.reveal_zone)
         controls_layout = QHBoxLayout(self.controls)
         controls_layout.setContentsMargins(0, 0, 0, 0)
         controls_layout.setSpacing(4)
-        expand = QToolButton()
-        expand.setText("ABRIR")
-        expand.setFixedSize(44, 24)
-        expand.clicked.connect(self.expand_requested.emit)
-        tune = QToolButton()
-        tune.setText("AJUSTE")
-        tune.setFixedSize(48, 24)
-        tune.clicked.connect(self.tune_requested.emit)
-        self.stop_button = QToolButton()
-        self.stop_button.setText("SALIR")
-        self.stop_button.setFixedSize(42, 24)
-        self.stop_button.setObjectName("capsuleStop")
-        self.stop_button.clicked.connect(self._perform_end_action)
-        controls_layout.addWidget(expand)
-        controls_layout.addWidget(tune)
-        controls_layout.addWidget(self.stop_button)
-        self.controls.setStyleSheet(
-            """
-            QToolButton {
-                min-height: 24px; padding: 0 5px; border-radius: 12px;
-                color: #a8c8ff; background: rgba(15, 25, 50, 215);
-                border: 1px solid rgba(66, 106, 181, 155);
-                font-family: "Segoe UI"; font-size: 8px; font-weight: 600;
-            }
-            QToolButton:hover { color: #ffffff; border-color: rgba(53, 207, 255, 210); }
-            QToolButton#capsuleStop {
-                color: #ff9ab9; border-color: rgba(255, 62, 121, 175);
-                background: rgba(85, 13, 47, 200);
-            }
-            """
-        )
+        self.open_button = QToolButton()
+        self.open_button.setObjectName("capsuleOpen")
+        self.open_button.setText("ABRIR")
+        self.open_button.setToolTip("Abrir ScribeFloat Premium")
+        self.open_button.setCursor(Qt.PointingHandCursor)
+        self.open_button.clicked.connect(self.expand_requested.emit)
+        controls_layout.addWidget(self.open_button)
+        self._apply_open_button_geometry()
         self.controls.adjustSize()
-        controls_y = max(8, int((self.height() - self.controls.height()) / 2))
-        self.controls.move(max(4, self.width() - self.controls.width() - 4), controls_y)
         self.controls_effect = QGraphicsOpacityEffect(self.controls)
         self.controls.setGraphicsEffect(self.controls_effect)
         self.controls_effect.setOpacity(0.0)
-        self.controls_animation = QPropertyAnimation(self.controls_effect, b"opacity", self)
-        self.controls_animation.setDuration(180)
-        self.controls_animation.setEasingCurve(QEasingCurve.OutCubic)
+        self.controls.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+
+        self.controls_opacity_animation = QPropertyAnimation(self.controls_effect, b"opacity", self)
+        self.controls_slide_animation = QPropertyAnimation(self.controls, b"pos", self)
+        self.controls_animation = QParallelAnimationGroup(self)
+        self.controls_animation.addAnimation(self.controls_opacity_animation)
+        self.controls_animation.addAnimation(self.controls_slide_animation)
+        self.controls_animation.finished.connect(self._controls_animation_finished)
+        self.capsule_surface = CapsuleSurface(self)
+        self._position_controls()
+        self.controls.hide()
 
         self.timer = QTimer(self)
         self.timer.setInterval(24)
@@ -654,10 +681,34 @@ class ListeningCapsule(QWidget):
 
     def resizeEvent(self, event):
         if hasattr(self, "controls"):
-            self.controls.adjustSize()
-            controls_y = max(8, int((self.height() - self.controls.height()) / 2))
-            self.controls.move(max(4, self.width() - self.controls.width() - 4), controls_y)
+            self._position_controls()
         super().resizeEvent(event)
+
+    def _position_controls(self):
+        if hasattr(self, "controls_animation"):
+            self.controls_animation.stop()
+        reveal_top = self._capsule_body_height - 6 + min(0, self._open_button_offset)
+        self.reveal_zone.setGeometry(
+            0,
+            reveal_top,
+            self.width(),
+            self.height() - reveal_top,
+        )
+        self.controls.adjustSize()
+        controls_x = max(0, int((self.reveal_zone.width() - self.controls.width()) / 2))
+        self._controls_hidden_pos = QPoint(controls_x, -self.controls.height() + 2)
+        self._controls_visible_pos = QPoint(controls_x, 4 + max(0, self._open_button_offset))
+        is_revealed = hasattr(self, "controls_effect") and self.controls_effect.opacity() >= 0.5
+        self.controls.move(self._controls_visible_pos if is_revealed else self._controls_hidden_pos)
+        if hasattr(self, "capsule_surface"):
+            self.capsule_surface.setGeometry(
+                0,
+                0,
+                self.width(),
+                self._capsule_body_height,
+            )
+            self.capsule_surface.raise_()
+            self.capsule_surface.update()
 
     def _keep_inside_screen(self):
         if not self.isVisible():
@@ -678,7 +729,23 @@ class ListeningCapsule(QWidget):
     def apply_visual_config(self, config):
         width = max(96, min(1000, int(config.get("capsule_width", 340))))
         height = max(32, min(320, int(config.get("capsule_height", 60))))
-        self.setFixedSize(width, height)
+        self._open_button_size = max(60, min(160, int(config.get("open_button_size", 100))))
+        self._open_button_width = max(60, min(200, int(config.get("open_button_width", 100))))
+        self._open_button_height = max(60, min(180, int(config.get("open_button_height", 100))))
+        self._open_button_offset = max(-18, min(36, int(config.get("open_button_offset", 0))))
+        animation_tenths = max(
+            2,
+            min(40, int(config.get("open_button_animation_tenths", 2))),
+        )
+        self._open_button_animation_ms = animation_tenths * 100
+        button_width, button_height = self._open_button_dimensions(width)
+        self._control_zone_height = max(34, button_height + 9) + max(0, self._open_button_offset)
+        self._capsule_body_height = height
+        self.setFixedSize(width, height + self._control_zone_height)
+        if hasattr(self, "open_button"):
+            self._apply_open_button_geometry(button_width, button_height)
+        if hasattr(self, "controls"):
+            self._position_controls()
         self._keep_inside_screen()
         self.wave_speed = 0.025 + (max(5, min(100, int(config.get("wave_speed", 55)))) * 0.0022)
         response = max(5, min(100, int(config.get("wave_response", 62))))
@@ -690,32 +757,69 @@ class ListeningCapsule(QWidget):
         self.microphone_scale = max(55, min(180, int(config.get("microphone_size", 100)))) / 100.0
         self.indicator_scale = max(55, min(180, int(config.get("indicator_size", 100)))) / 100.0
         self.wave_width_scale = max(35, min(175, int(config.get("wave_width", 100)))) / 100.0
-        self.update()
+        self._update_capsule_visual()
+
+    def _open_button_dimensions(self, capsule_width=None):
+        general_scale = self._open_button_size / 100.0
+        width_scale = self._open_button_width / 100.0
+        height_scale = self._open_button_height / 100.0
+        available_width = capsule_width if capsule_width is not None else self.width()
+        maximum_width = max(44, int(available_width) - 8)
+        button_width = min(
+            maximum_width,
+            max(44, round(76 * general_scale * width_scale)),
+        )
+        button_height = max(16, round(25 * general_scale * height_scale))
+        return button_width, button_height
+
+    def _apply_open_button_geometry(self, button_width=None, button_height=None):
+        if button_width is None or button_height is None:
+            button_width, button_height = self._open_button_dimensions()
+        self.open_button.setFixedSize(button_width, button_height)
+
+        general_scale = self._open_button_size / 100.0
+        radius = max(8, button_height // 2)
+        font_size = max(7, min(16, round(9 * general_scale)))
+        horizontal_padding = max(3, min(14, round(9 * general_scale)))
+        self.controls.setStyleSheet(
+            f"""
+            QToolButton {{
+                padding: 0 {horizontal_padding}px; border-radius: {radius}px;
+                color: #c9deff; background: rgba(7, 16, 35, 242);
+                border: 1px solid rgba(78, 145, 234, 190);
+                font-family: "Segoe UI"; font-size: {font_size}px; font-weight: 700;
+            }}
+            QToolButton:hover {{
+                color: #ffffff; border-color: rgba(61, 218, 255, 235);
+                background: rgba(14, 39, 77, 250);
+            }}
+            QToolButton:pressed {{ background: rgba(25, 66, 124, 250); }}
+            QToolButton#capsuleOpen {{ color: #c5ddff; }}
+            """
+        )
 
     def set_recording(self, active):
         self.recording = active
-        self.stop_button.setText("STOP" if active else "SALIR")
-        self.stop_button.setToolTip("Detener grabacion" if active else "Cerrar ScribeFloat Premium")
         if not active:
             self.target_level = 0.0
             self.target_envelope = [0.0] * 64
-
-    def _perform_end_action(self):
-        if self.recording:
-            self.stop_requested.emit()
-        else:
-            self.close_requested.emit()
 
     def set_previewing(self, active):
         self.previewing = bool(active) and not self.recording
         if not self.previewing and not self.recording:
             self.target_level = 0.0
             self.target_envelope = [0.0] * 64
-        self.update()
+        self._update_capsule_visual()
 
     def set_status(self, text):
         self.status_text = text.upper()
-        self.update()
+        self._update_capsule_visual()
+
+    def _update_capsule_visual(self):
+        if hasattr(self, "capsule_surface"):
+            self.capsule_surface.update()
+        else:
+            self.update()
 
     def _tick(self):
         if self.previewing and not self.recording:
@@ -735,13 +839,31 @@ class ListeningCapsule(QWidget):
         self.level += (self.target_level - self.level) * response
         for index, value in enumerate(self.target_envelope):
             self.envelope[index] += (value - self.envelope[index]) * response
-        self.update()
+        self._update_capsule_visual()
 
     def _animate_controls(self, visible):
         self.controls_animation.stop()
-        self.controls_animation.setStartValue(self.controls_effect.opacity())
-        self.controls_animation.setEndValue(1.0 if visible else 0.0)
+        self.controls.setAttribute(Qt.WA_TransparentForMouseEvents, not visible)
+        if visible:
+            self.controls.show()
+            self.controls.raise_()
+        duration = self._open_button_animation_ms
+        easing = QEasingCurve.OutCubic if visible else QEasingCurve.InCubic
+        self.controls_opacity_animation.setDuration(duration)
+        self.controls_opacity_animation.setEasingCurve(easing)
+        self.controls_opacity_animation.setStartValue(self.controls_effect.opacity())
+        self.controls_opacity_animation.setEndValue(1.0 if visible else 0.0)
+        self.controls_slide_animation.setDuration(duration)
+        self.controls_slide_animation.setEasingCurve(easing)
+        self.controls_slide_animation.setStartValue(self.controls.pos())
+        self.controls_slide_animation.setEndValue(
+            self._controls_visible_pos if visible else self._controls_hidden_pos
+        )
         self.controls_animation.start()
+
+    def _controls_animation_finished(self):
+        if self.controls_effect.opacity() <= 0.01:
+            self.controls.hide()
 
     def enterEvent(self, event):
         self._animate_controls(True)
@@ -752,7 +874,17 @@ class ListeningCapsule(QWidget):
         super().leaveEvent(event)
 
     def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton and not self.controls.geometry().contains(event.position().toPoint()):
+        controls_rect = QRect(
+            self.reveal_zone.pos() + self.controls.pos(),
+            self.controls.size(),
+        )
+        exposed_controls = controls_rect.intersected(
+            QRect(0, self._capsule_body_height, self.width(), self.height() - self._capsule_body_height)
+        )
+        over_controls = self.controls_effect.opacity() > 0.05 and exposed_controls.contains(
+            event.position().toPoint()
+        )
+        if event.button() == Qt.LeftButton and not over_controls:
             self._drag_origin = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
         super().mousePressEvent(event)
 
@@ -791,9 +923,11 @@ class ListeningCapsule(QWidget):
         return movement * amplitude * falloff * self.wave_amplitude * (1.0 if stream == 0 else 0.78)
 
     def paintEvent(self, event):
-        painter = QPainter(self)
+        super().paintEvent(event)
+
+    def _paint_capsule(self, painter):
         painter.setRenderHint(QPainter.Antialiasing)
-        body = QRectF(7, 7, self.width() - 14, self.height() - 14)
+        body = QRectF(7, 7, self.width() - 14, self._capsule_body_height - 14)
         body_path = QPainterPath()
         body_path.addRoundedRect(body, body.height() / 2, body.height() / 2)
 
@@ -830,7 +964,6 @@ class ListeningCapsule(QWidget):
         self._draw_microphone(painter, body)
         self._draw_activity_indicator(painter, body)
         painter.restore()
-        painter.end()
 
     def _draw_microphone(self, painter, body):
         """Render a stable microphone mark without adding an image asset."""
@@ -959,6 +1092,10 @@ class ScribeFloatController(QObject):
     segment_finished = Signal(int, int, str, str)
     model_loaded = Signal(str, str, str)
     model_failed = Signal(str)
+    update_checked = Signal(object)
+    update_failed = Signal(str)
+    update_progress = Signal(int)
+    update_downloaded = Signal(str)
 
     def __init__(self, application):
         super().__init__()
@@ -990,28 +1127,22 @@ class ScribeFloatController(QObject):
         self.settings_dialog = None
         self._settings_preview_only_capsule = False
         self._settings_status_before_preview = ""
+        self._pending_update = None
+        self._update_busy = False
 
         self.panel = PremiumPanel(self.cfg)
         self.capsule = ListeningCapsule(self.cfg)
         self._connect_ui()
         self._restore_positions()
         self._set_state(UiState.LOADING_MODEL, "Preparando modelo...")
-        if self.cfg.get("last_view") == "capsule":
-            self.panel.setAttribute(Qt.WA_ShowWithoutActivating, True)
-            self.panel.setWindowOpacity(0.0)
-            self.panel.show()
-            _ensure_taskbar_window(self.panel)
-            self.capsule.set_status("LISTO")
-            self._show_capsule()
-            self.panel.setWindowOpacity(1.0)
-        else:
-            self.panel.show()
-            _ensure_taskbar_window(self.panel)
+        self.capsule.set_status("LISTO")
+        self._show_capsule()
 
         self._segment_worker_thread = threading.Thread(target=self._segment_worker, daemon=True)
         self._segment_worker_thread.start()
         self._sounds_enabled = False
         self._sound_paths = {}
+        self._sound_effects = {}
 
         smoke_test = os.getenv("SCRIBEFLOAT_UI_SMOKE_TEST") == "1"
         if smoke_test:
@@ -1034,16 +1165,17 @@ class ScribeFloatController(QObject):
         self.panel.language_selected.connect(self._change_language)
         self.panel.position_changed.connect(lambda point: self._save_position("panel_position", point))
         self.panel.restore_requested.connect(self._restore_from_capsule)
-        self.capsule.stop_requested.connect(self._stop_recording)
-        self.capsule.close_requested.connect(self.shutdown)
         self.capsule.expand_requested.connect(self._restore_from_capsule)
-        self.capsule.tune_requested.connect(self._open_settings)
         self.capsule.position_changed.connect(lambda point: self._save_position("capsule_position", point))
         self.toggle_from_thread.connect(self.toggle_recording)
         self.audio_from_thread.connect(self._receive_audio_visual)
         self.segment_finished.connect(self._finish_segment)
         self.model_loaded.connect(self._on_model_loaded)
         self.model_failed.connect(self._on_model_failed)
+        self.update_checked.connect(self._on_update_checked)
+        self.update_failed.connect(self._on_update_failed)
+        self.update_progress.connect(self._on_update_progress)
+        self.update_downloaded.connect(self._on_update_downloaded)
 
     def _restore_positions(self):
         panel_position = self.cfg.get("panel_position")
@@ -1080,21 +1212,28 @@ class ScribeFloatController(QObject):
             "stop": self._asset_path("stop.mp3"),
         }
         try:
+            missing = [path for path in self._sound_paths.values() if not os.path.isfile(path)]
+            if missing:
+                raise FileNotFoundError(f"Faltan recursos de sonido: {', '.join(missing)}")
             pygame.mixer.init()
+            pygame.mixer.set_num_channels(4)
+            self._sound_effects = {
+                name: pygame.mixer.Sound(path) for name, path in self._sound_paths.items()
+            }
             self._sounds_enabled = True
         except Exception as exc:
+            self._sounds_enabled = False
+            self._sound_effects = {}
             print(f"[Audio] Error inicializando sonidos: {exc}")
 
     def _asset_path(self, filename):
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        return os.path.join(base_dir, "assets", filename)
+        return str(ASSETS_DIR / filename)
 
     def _play_sound(self, name):
         if not self._sounds_enabled:
             return
         try:
-            pygame.mixer.music.load(self._sound_paths[name])
-            pygame.mixer.music.play()
+            self._sound_effects[name].play()
         except Exception as exc:
             print(f"[Audio] Error reproduciendo {name}: {exc}")
 
@@ -1193,10 +1332,16 @@ class ScribeFloatController(QObject):
         self._paste_after_stop = False
         self._paste_scheduled = False
         self._session_error = ""
-        self._set_state(UiState.RECORDING_CAPSULE, "Escuchando...")
-        self.capsule.set_status("ESCUCHANDO...")
+        if self._return_to_capsule_after_recording:
+            self._set_state(UiState.RECORDING_CAPSULE, "Escuchando...")
+            self.capsule.set_status("ESCUCHANDO...")
+            self._show_capsule()
+        else:
+            self.panel.show_listening_placeholder()
+            self._set_state(UiState.RECORDING_EXPANDED, "Escuchando en modo privado...")
+            if not self.panel.isVisible():
+                self._show_panel(passive=True)
         self._play_sound("start")
-        self._show_capsule()
         QTimer.singleShot(START_SOUND_DELAY_MS, self._start_audio_capture)
 
     def _start_audio_capture(self):
@@ -1231,9 +1376,12 @@ class ScribeFloatController(QObject):
         self.is_recording = False
         self._paste_after_stop = True
         self._set_state(UiState.FINALIZING, "Procesando transcripcion...")
-        self.capsule.set_status("PROCESANDO...")
-        if not self.capsule.isVisible():
-            self._show_capsule()
+        if self._return_to_capsule_after_recording:
+            self.capsule.set_status("PROCESANDO...")
+            if not self.capsule.isVisible():
+                self._show_capsule()
+        elif not self.panel.isVisible():
+            self._show_panel(passive=True)
         if self.audio_capture:
             self.audio_capture.stop()
             self.audio_capture = None
@@ -1368,12 +1516,14 @@ class ScribeFloatController(QObject):
         self.panel.set_audio_level(level)
 
     def _show_capsule(self):
+        was_visible = self.capsule.isVisible()
         self._save_position("panel_position", self.panel.pos())
         self.cfg["last_view"] = "capsule"
         save_config(self.cfg)
-        self.panel.setAttribute(Qt.WA_ShowWithoutActivating, True)
-        self.panel.show_minimized_from_controller()
-        _ensure_taskbar_window(self.panel)
+        self.panel.hide()
+        if was_visible:
+            self.capsule.setWindowOpacity(1.0)
+            return
         self.capsule.setWindowOpacity(0.0)
         self.capsule.show()
         _make_no_activate(self.capsule)
@@ -1387,14 +1537,18 @@ class ScribeFloatController(QObject):
         self._animations.append(animation)
 
     def _show_panel(self, passive=False):
+        was_visible = self.panel.isVisible() and not self.panel.isMinimized()
         self.cfg["last_view"] = "panel"
         save_config(self.cfg)
         if not self.is_recording:
             self.capsule.hide()
         self.panel.setAttribute(Qt.WA_ShowWithoutActivating, passive)
-        self.panel.show_normal_from_controller()
-        _ensure_taskbar_window(self.panel)
-        self.panel.raise_()
+        if not was_visible:
+            self.panel.show_normal_from_controller()
+            _ensure_taskbar_window(self.panel)
+            self.panel.raise_()
+        elif not passive:
+            self.panel.raise_()
         if not passive:
             self.panel.activateWindow()
 
@@ -1457,6 +1611,8 @@ class ScribeFloatController(QObject):
             on_preview=self._preview_visual_settings,
             on_capture_start=self._suspend_hotkey,
             on_capture_finish=self._resume_hotkey,
+            on_check_updates=self._check_for_updates,
+            current_version=APP_VERSION,
         )
         self.settings_dialog.finished.connect(self._settings_closed)
         self.settings_dialog.show()
@@ -1481,10 +1637,109 @@ class ScribeFloatController(QObject):
         self.capsule.apply_visual_config(preview_config)
 
     def _apply_settings(self, new_config):
+        previous_hotkey = self.cfg.get("hotkey", "ctrl+space")
         self.cfg.update(new_config)
         self.capsule.apply_visual_config(self.cfg)
         save_config(self.cfg)
-        self._register_hotkey()
+        current_hotkey = self.cfg.get("hotkey", "ctrl+space")
+        if current_hotkey != previous_hotkey:
+            self._register_hotkey()
+        else:
+            self.panel.set_hotkey(current_hotkey)
+
+    def _set_update_status(self, text, busy=False):
+        if self.settings_dialog and self.settings_dialog.isVisible():
+            self.settings_dialog.set_update_status(text, busy=busy)
+
+    def _check_for_updates(self):
+        if self._update_busy:
+            return
+        self._update_busy = True
+        self._set_update_status("Consultando la ultima version en GitHub...", busy=True)
+
+        def worker():
+            try:
+                self.update_checked.emit(check_for_update(APP_VERSION))
+            except Exception as exc:
+                self.update_failed.emit(str(exc))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    @Slot(object)
+    def _on_update_checked(self, update):
+        self._update_busy = False
+        if not update:
+            self._set_update_status(f"Version {APP_VERSION}: ya esta actualizada.")
+            return
+
+        self._pending_update = update
+        self._set_update_status(f"Nueva version disponible: {update['version']}")
+        answer = QMessageBox.question(
+            self.settings_dialog,
+            "Actualizacion disponible",
+            f"Esta disponible ScribeFloat Premium {update['version']}.\n\n"
+            "¿Queres descargar ahora el instalador verificado?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,
+        )
+        if answer == QMessageBox.Yes:
+            self._download_pending_update()
+
+    def _download_pending_update(self):
+        if self._update_busy or not self._pending_update:
+            return
+        update = dict(self._pending_update)
+        self._update_busy = True
+        self._set_update_status(f"Descargando version {update['version']}... 0%", busy=True)
+
+        def progress(value):
+            self.update_progress.emit(value)
+
+        def worker():
+            try:
+                installer = download_update(update, progress_callback=progress)
+                self.update_downloaded.emit(installer)
+            except Exception as exc:
+                self.update_failed.emit(str(exc))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    @Slot(int)
+    def _on_update_progress(self, value):
+        version = self._pending_update["version"] if self._pending_update else "nueva"
+        self._set_update_status(f"Descargando version {version}... {value}%", busy=True)
+
+    @Slot(str)
+    def _on_update_downloaded(self, installer_path):
+        self._update_busy = False
+        self._set_update_status("Actualizacion descargada y verificada.")
+        answer = QMessageBox.question(
+            self.settings_dialog,
+            "Instalar actualizacion",
+            "La descarga paso la verificacion SHA-256.\n\n"
+            "¿Queres cerrar ScribeFloat e instalarla ahora?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,
+        )
+        if answer != QMessageBox.Yes:
+            self._set_update_status(f"Instalador listo en: {installer_path}")
+            return
+        try:
+            subprocess.Popen([installer_path], cwd=os.path.dirname(installer_path), close_fds=True)
+        except Exception as exc:
+            self._on_update_failed(f"No se pudo abrir el instalador: {exc}")
+            return
+        QTimer.singleShot(150, self.shutdown)
+
+    @Slot(str)
+    def _on_update_failed(self, error):
+        self._update_busy = False
+        self._set_update_status("No se pudo completar la actualizacion.")
+        QMessageBox.warning(
+            self.settings_dialog,
+            "Actualizacion no disponible",
+            error,
+        )
 
     def _copy(self):
         text = self.full_transcript.strip()
@@ -1540,7 +1795,24 @@ class ScribeFloatController(QObject):
         self.application.exit(0)
 
 
+def _verify_packaged_resources():
+    """Exit-code based release check used after Nuitka compilation."""
+    try:
+        pygame.mixer.init()
+        for filename in ("start.mp3", "stop.mp3"):
+            path = ASSETS_DIR / filename
+            if not path.is_file():
+                return 2
+            pygame.mixer.Sound(str(path))
+        pygame.mixer.quit()
+        return 0
+    except Exception:
+        return 3
+
+
 def main():
+    if "--verify-package" in sys.argv:
+        return _verify_packaged_resources()
     if not _acquire_single_instance():
         return 0
     _set_windows_app_id()

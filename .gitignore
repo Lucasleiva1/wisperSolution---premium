@@ -19,12 +19,15 @@ ScribeFloat/Output/
 ScribeFloat/build_nuitka/
 ScribeFloat/build_nuitka_premium/
 ScribeFloat/build_nuitka_new/
+ScribeFloat/build_release/
+ScribeFloat/install_validation/
+ScribeFloat/.nuitka-cache/
+ScribeFloat/release/
+ScribeFloat/nuitka-crash-report*.xml
 
 # Instaladores y artefactos generados
 ScribeFloat/*.exe
 ScribeFloat/*.msi
-ScribeFloat/Generar_Setup.iss
-ScribeFloat/Preparar_Instalador.ps1
 ScribeFloat/venv_roto_*/
 ScribeFloat/runtime_*.log
 ScribeFloat/analisis_rendimiento.md
