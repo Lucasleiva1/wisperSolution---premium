@@ -8,3 +8,4 @@ sounddevice>=0.4.6
 numpy>=1.24.0
 keyboard>=0.13.5
 pygame>=2.6.0
+cryptography>=45.0.0,<47.0.0

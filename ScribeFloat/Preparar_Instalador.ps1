@@ -89,6 +89,15 @@ if (-not (Test-Path $Installer)) {
 }
 $Hash = (Get-FileHash $Installer -Algorithm SHA256).Hash.ToLowerInvariant()
 Set-Content -Path "$Installer.sha256" -Value "$Hash  ScribeFloat-Premium-Setup.exe" -Encoding ascii
+& $Python "tools\sign_release.py" $Installer
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path "$Installer.sig")) {
+    throw "No se pudo firmar criptograficamente el instalador."
+}
+& $Python "tools\verify_release.py" $Installer
+if ($LASTEXITCODE -ne 0) {
+    throw "La verificacion criptografica del instalador fallo."
+}
 
 Write-Host "LISTO: $Installer"
 Write-Host "SHA-256: $Hash"
+Write-Host "FIRMA: $Installer.sig"

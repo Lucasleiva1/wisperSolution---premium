@@ -1,5 +1,6 @@
 """GitHub Releases updater for ScribeFloat Premium."""
 
+import base64
 import hashlib
 import json
 import os
@@ -8,12 +9,17 @@ import tempfile
 import urllib.request
 from pathlib import Path
 
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
 
 GITHUB_REPOSITORY = "Lucasleiva1/wisperSolution---premium"
 RELEASES_API_URL = f"https://api.github.com/repos/{GITHUB_REPOSITORY}/releases/latest"
 RELEASES_PAGE_URL = f"https://github.com/{GITHUB_REPOSITORY}/releases/latest"
 INSTALLER_ASSET_NAME = "ScribeFloat-Premium-Setup.exe"
 CHECKSUM_ASSET_NAME = f"{INSTALLER_ASSET_NAME}.sha256"
+SIGNATURE_ASSET_NAME = f"{INSTALLER_ASSET_NAME}.sig"
+UPDATE_PUBLIC_KEY_B64 = "k1M7q6naYdHM5G1eS+DEA5wWpvU3BB8mYT25mti2ixs="
 USER_AGENT = "ScribeFloat-Premium-Updater"
 
 
@@ -73,6 +79,12 @@ def check_for_update(current_version):
             f"La version {latest_version} no contiene el checksum {CHECKSUM_ASSET_NAME}."
         )
 
+    signature = assets.get(SIGNATURE_ASSET_NAME)
+    if not signature or not signature.get("browser_download_url"):
+        raise UpdateError(
+            f"La version {latest_version} no contiene la firma {SIGNATURE_ASSET_NAME}."
+        )
+
     return {
         "version": latest_version,
         "name": release.get("name") or f"Version {latest_version}",
@@ -80,6 +92,7 @@ def check_for_update(current_version):
         "page_url": release.get("html_url") or RELEASES_PAGE_URL,
         "installer_url": installer["browser_download_url"],
         "checksum_url": checksum["browser_download_url"],
+        "signature_url": signature["browser_download_url"],
     }
 
 
@@ -100,8 +113,12 @@ def _expected_checksum(checksum_url):
 
 
 def download_update(update, progress_callback=None):
-    """Download and SHA-256 verify a release installer. Return its local path."""
+    """Download and cryptographically verify a release installer."""
     expected_hash = _expected_checksum(update["checksum_url"])
+    try:
+        signature = base64.b64decode(_read_url(update["signature_url"]).strip(), validate=True)
+    except Exception as exc:
+        raise UpdateError("La firma Ed25519 de la actualizacion no es valida.") from exc
     destination = _updates_dir() / f"ScribeFloat-Premium-{update['version']}-Setup.exe"
     partial = destination.with_suffix(".download")
     digest = hashlib.sha256()
@@ -130,6 +147,15 @@ def download_update(update, progress_callback=None):
     if actual_hash != expected_hash:
         partial.unlink(missing_ok=True)
         raise UpdateError("La descarga no paso la verificacion SHA-256 y fue descartada.")
+
+    try:
+        public_key = Ed25519PublicKey.from_public_bytes(base64.b64decode(UPDATE_PUBLIC_KEY_B64))
+        public_key.verify(signature, bytes.fromhex(actual_hash))
+    except (InvalidSignature, ValueError, TypeError) as exc:
+        partial.unlink(missing_ok=True)
+        raise UpdateError(
+            "La firma criptografica de la actualizacion no coincide y fue descartada."
+        ) from exc
 
     os.replace(partial, destination)
     if progress_callback:
