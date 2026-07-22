@@ -60,7 +60,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config import load_config, save_config
 from settings_ui import SettingsPanel
 from utils import clean_text, save_transcription
-from app_paths import ASSETS_DIR, EXPORTS_DIR
+from app_paths import APP_DIR, ASSETS_DIR, EXPORTS_DIR
 from updater import check_for_update, download_update
 from version import APP_VERSION
 
@@ -76,6 +76,22 @@ LANGS = {
 START_SOUND_DELAY_MS = 350
 WINDOW_TRANSITION_GUARD_MS = 120
 SINGLE_INSTANCE_MUTEX = None
+RUNTIME_LOG_HANDLE = None
+
+
+def _configure_runtime_log():
+    """Keep diagnostics from windowed frozen builds in the installed folder."""
+    global RUNTIME_LOG_HANDLE
+    if not getattr(sys, "frozen", False) or RUNTIME_LOG_HANDLE is not None:
+        return
+    try:
+        log_path = APP_DIR / "scribefloat-runtime.log"
+        RUNTIME_LOG_HANDLE = open(log_path, "a", encoding="utf-8", buffering=1)
+        sys.stdout = RUNTIME_LOG_HANDLE
+        sys.stderr = RUNTIME_LOG_HANDLE
+        print(f"\n[Runtime] Inicio {time.strftime('%Y-%m-%d %H:%M:%S')} | {sys.executable}")
+    except Exception:
+        RUNTIME_LOG_HANDLE = None
 
 
 class UiState(Enum):
@@ -1221,6 +1237,7 @@ class ScribeFloatController(QObject):
                 name: pygame.mixer.Sound(path) for name, path in self._sound_paths.items()
             }
             self._sounds_enabled = True
+            print("[Audio] Sonidos cargados: start.mp3, stop.mp3")
         except Exception as exc:
             self._sounds_enabled = False
             self._sound_effects = {}
@@ -1234,6 +1251,7 @@ class ScribeFloatController(QObject):
             return
         try:
             self._sound_effects[name].play()
+            print(f"[Audio] Sonido reproducido: {name}")
         except Exception as exc:
             print(f"[Audio] Error reproduciendo {name}: {exc}")
 
@@ -1321,6 +1339,7 @@ class ScribeFloatController(QObject):
         self._start_recording()
 
     def _start_recording(self):
+        print("[Recording] Inicio solicitado")
         self._return_to_capsule_after_recording = self.cfg.get("last_view") == "capsule"
         self.capsule.set_previewing(False)
         self._reset_transcription_state(clear_display=True, clear_model_context=True)
@@ -1373,6 +1392,7 @@ class ScribeFloatController(QObject):
     def _stop_recording(self):
         if not self.is_recording:
             return
+        print("[Recording] Fin solicitado")
         self.is_recording = False
         self._paste_after_stop = True
         self._set_state(UiState.FINALIZING, "Procesando transcripcion...")
@@ -1811,6 +1831,7 @@ def _verify_packaged_resources():
 
 
 def main():
+    _configure_runtime_log()
     if "--verify-package" in sys.argv:
         return _verify_packaged_resources()
     if not _acquire_single_instance():

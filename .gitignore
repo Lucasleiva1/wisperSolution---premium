@@ -23,6 +23,9 @@ ScribeFloat/build_release/
 ScribeFloat/install_validation/
 ScribeFloat/.nuitka-cache/
 ScribeFloat/release/
+ScribeFloat/build_pyinstaller/
+ScribeFloat/dist_pyinstaller/
+ScribeFloat/release_pyinstaller/
 ScribeFloat/nuitka-crash-report*.xml
 
 # Instaladores y artefactos generados
