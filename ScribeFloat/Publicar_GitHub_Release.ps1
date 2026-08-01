@@ -1,12 +1,23 @@
+param(
+    [string]$Version = "1.1.2-pre.1"
+)
+
 $ErrorActionPreference = "Stop"
 
-$Tag = "v1.1.0"
-$Installer = "release\ScribeFloat-Premium-Setup.exe"
+$Tag = "v$Version"
+$Installer = "release_pyinstaller\Whisper-Solution-Setup.exe"
 $Checksum = "$Installer.sha256"
 $Signature = "$Installer.sig"
-$Notes = "RELEASE_NOTES_1.1.0.md"
+$LegacyInstaller = "release_pyinstaller\ScribeFloat-Premium-Setup.exe"
+$LegacyChecksum = "$LegacyInstaller.sha256"
+$LegacySignature = "$LegacyInstaller.sig"
+$Notes = "RELEASE_NOTES_$Version.md"
 
-foreach ($File in @($Installer, $Checksum, $Signature, $Notes)) {
+foreach ($File in @(
+    $Installer, $Checksum, $Signature,
+    $LegacyInstaller, $LegacyChecksum, $LegacySignature,
+    $Notes
+)) {
     if (-not (Test-Path $File)) {
         throw "Falta el archivo requerido: $File"
     }
@@ -18,7 +29,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 if (-not (git tag --list $Tag)) {
-    git tag -a $Tag -m "ScribeFloat Premium 1.1.0"
+    git tag -a $Tag -m "Whisper Solution $Version PRE-FINAL"
 }
 
 git push origin main
@@ -26,10 +37,10 @@ git push origin $Tag
 
 $ExistingRelease = gh release view $Tag 2>$null
 if ($LASTEXITCODE -eq 0) {
-    gh release upload $Tag $Installer $Checksum $Signature --clobber
-    gh release edit $Tag --title "ScribeFloat Premium 1.1.0" --notes-file $Notes --latest
+    gh release upload $Tag $Installer $Checksum $Signature $LegacyInstaller $LegacyChecksum $LegacySignature --clobber
+    gh release edit $Tag --title "Whisper Solution $Version - PRE-FINAL" --notes-file $Notes --latest
 } else {
-    gh release create $Tag $Installer $Checksum $Signature --title "ScribeFloat Premium 1.1.0" --notes-file $Notes --latest
+    gh release create $Tag $Installer $Checksum $Signature $LegacyInstaller $LegacyChecksum $LegacySignature --title "Whisper Solution $Version - PRE-FINAL" --notes-file $Notes --latest
 }
 
 if ($LASTEXITCODE -ne 0) {

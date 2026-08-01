@@ -1,4 +1,4 @@
-"""GitHub Releases updater for ScribeFloat Premium."""
+"""GitHub Releases updater for Whisper Solution."""
 
 import base64
 import hashlib
@@ -16,11 +16,11 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 GITHUB_REPOSITORY = "Lucasleiva1/wisperSolution---premium"
 RELEASES_API_URL = f"https://api.github.com/repos/{GITHUB_REPOSITORY}/releases/latest"
 RELEASES_PAGE_URL = f"https://github.com/{GITHUB_REPOSITORY}/releases/latest"
-INSTALLER_ASSET_NAME = "ScribeFloat-Premium-Setup.exe"
+INSTALLER_ASSET_NAME = "Whisper-Solution-Setup.exe"
 CHECKSUM_ASSET_NAME = f"{INSTALLER_ASSET_NAME}.sha256"
 SIGNATURE_ASSET_NAME = f"{INSTALLER_ASSET_NAME}.sig"
 UPDATE_PUBLIC_KEY_B64 = "k1M7q6naYdHM5G1eS+DEA5wWpvU3BB8mYT25mti2ixs="
-USER_AGENT = "ScribeFloat-Premium-Updater"
+USER_AGENT = "Whisper-Solution-Updater"
 
 
 class UpdateError(RuntimeError):
@@ -99,7 +99,7 @@ def check_for_update(current_version):
 def _updates_dir():
     local_app_data = os.environ.get("LOCALAPPDATA")
     root = Path(local_app_data) if local_app_data else Path(tempfile.gettempdir())
-    destination = root / "ScribeFloat-Premium" / "updates"
+    destination = root / "Whisper-Solution" / "updates"
     destination.mkdir(parents=True, exist_ok=True)
     return destination
 
@@ -119,7 +119,7 @@ def download_update(update, progress_callback=None):
         signature = base64.b64decode(_read_url(update["signature_url"]).strip(), validate=True)
     except Exception as exc:
         raise UpdateError("La firma Ed25519 de la actualizacion no es valida.") from exc
-    destination = _updates_dir() / f"ScribeFloat-Premium-{update['version']}-Setup.exe"
+    destination = _updates_dir() / f"Whisper-Solution-{update['version']}-Setup.exe"
     partial = destination.with_suffix(".download")
     digest = hashlib.sha256()
 

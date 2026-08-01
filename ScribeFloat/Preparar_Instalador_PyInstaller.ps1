@@ -18,7 +18,7 @@ Set-Location -LiteralPath $projectDir
     (Join-Path $projectDir "ScribeFloat-PyInstaller.spec")
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller fallo con codigo $LASTEXITCODE" }
 
-$appExe = Join-Path $projectDir "dist_pyinstaller\ScribeFloat-Premium\ScribeFloat-Premium.exe"
+$appExe = Join-Path $projectDir "dist_pyinstaller\Whisper-Solution\Whisper-Solution.exe"
 if (-not (Test-Path -LiteralPath $appExe)) {
     throw "PyInstaller no genero $appExe"
 }
@@ -29,7 +29,7 @@ if ($LASTEXITCODE -ne 0) { throw "La verificacion de sonidos fallo con codigo $L
 & $innoExe (Join-Path $projectDir "Generar_Setup_PyInstaller.iss")
 if ($LASTEXITCODE -ne 0) { throw "Inno Setup fallo con codigo $LASTEXITCODE" }
 
-$setupExe = Join-Path $projectDir "release_pyinstaller\ScribeFloat-Premium-Setup.exe"
+$setupExe = Join-Path $projectDir "release_pyinstaller\Whisper-Solution-Setup.exe"
 if (-not (Test-Path -LiteralPath $setupExe)) {
     throw "No se genero el instalador: $setupExe"
 }

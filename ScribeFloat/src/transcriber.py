@@ -1,5 +1,5 @@
 """
-ScribeFloat Premium - Motor de Transcripcion Multilingue
+Whisper Solution - Motor de Transcripcion Multilingue
 Utiliza Faster-Whisper con optimización para GPUs con 4GB VRAM (GTX 1050 Ti).
 """
 

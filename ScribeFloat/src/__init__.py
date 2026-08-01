@@ -1,1 +1,1 @@
-# ScribeFloat Premium
+# Whisper Solution

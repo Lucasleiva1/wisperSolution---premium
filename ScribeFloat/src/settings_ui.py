@@ -1,4 +1,4 @@
-"""Configuration and visual adjustment dialogs for ScribeFloat Premium."""
+"""Configuration and visual adjustment dialogs for Whisper Solution."""
 
 import keyboard
 from PySide6.QtCore import Qt, Signal, Slot
@@ -184,7 +184,7 @@ class VisualSettingsPanel(QDialog):
         self._saved = False
         self._visual_sliders = {}
 
-        self.setWindowTitle("Ajustes visuales - ScribeFloat Premium")
+        self.setWindowTitle("Ajustes visuales - Whisper Solution")
         self.setWindowFlags(Qt.Dialog | Qt.WindowTitleHint | Qt.WindowCloseButtonHint | Qt.WindowStaysOnTopHint)
         self.setWindowModality(Qt.WindowModal)
         self.setMinimumSize(470, 560)
@@ -395,7 +395,7 @@ class SettingsPanel(QDialog):
         self._keyboard_hook = None
         self.visual_dialog = None
 
-        self.setWindowTitle("Configuracion - ScribeFloat Premium")
+        self.setWindowTitle("Configuracion - Whisper Solution")
         self.setWindowFlags(Qt.Dialog | Qt.WindowTitleHint | Qt.WindowCloseButtonHint | Qt.WindowStaysOnTopHint)
         self.setMinimumSize(470, 500)
         self.resize(470, 500)

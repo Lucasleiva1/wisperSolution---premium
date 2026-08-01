@@ -1,5 +1,5 @@
 """
-ScribeFloat Premium - Captura de Audio y VAD
+Whisper Solution - Captura de Audio y VAD
 Captura audio del micrófono en tiempo real con detección de actividad de voz.
 """
 

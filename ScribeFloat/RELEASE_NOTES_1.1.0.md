@@ -1,4 +1,4 @@
-## ScribeFloat Premium 1.1.0
+## Whisper Solution 1.1.0
 
 - Nuevo actualizador integrado en **Configuracion > Actualizaciones**.
 - Descarga segura desde GitHub Releases con verificacion SHA-256 y firma Ed25519 antes de instalar.
@@ -10,6 +10,6 @@
 
 ### Assets requeridos por el actualizador
 
-- `ScribeFloat-Premium-Setup.exe`
-- `ScribeFloat-Premium-Setup.exe.sha256`
-- `ScribeFloat-Premium-Setup.exe.sig`
+- `Whisper-Solution-Setup.exe`
+- `Whisper-Solution-Setup.exe.sha256`
+- `Whisper-Solution-Setup.exe.sig`

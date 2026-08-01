@@ -1,4 +1,4 @@
-"""Verify a ScribeFloat installer checksum and Ed25519 signature."""
+"""Verify a Whisper Solution installer checksum and Ed25519 signature."""
 
 import argparse
 import base64

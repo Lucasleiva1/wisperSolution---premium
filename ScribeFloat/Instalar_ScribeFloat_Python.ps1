@@ -1,5 +1,5 @@
 param(
-    [string]$InstallRoot = "$env:LOCALAPPDATA\ScribeFloat-Premium"
+    [string]$InstallRoot = "$env:LOCALAPPDATA\Whisper-Solution"
 )
 
 $ErrorActionPreference = "Stop"
@@ -7,10 +7,10 @@ $ErrorActionPreference = "Stop"
 $SourceRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $AppDir = Join-Path $InstallRoot "app"
 $VenvDir = Join-Path $InstallRoot "venv"
-$StartMenuDir = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\ScribeFloat Premium"
-$DesktopShortcut = Join-Path ([Environment]::GetFolderPath("Desktop")) "ScribeFloat Premium.lnk"
-$StartMenuShortcut = Join-Path $StartMenuDir "ScribeFloat Premium.lnk"
-$LauncherCmd = Join-Path $InstallRoot "Abrir_ScribeFloat_Premium.cmd"
+$StartMenuDir = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Whisper Solution"
+$DesktopShortcut = Join-Path ([Environment]::GetFolderPath("Desktop")) "Whisper Solution.lnk"
+$StartMenuShortcut = Join-Path $StartMenuDir "Whisper Solution.lnk"
+$LauncherCmd = Join-Path $InstallRoot "Abrir_Whisper_Solution.cmd"
 
 function Test-PythonExe($Path) {
     try {
@@ -102,17 +102,17 @@ function Ensure-Venv {
 
     & $venvPython -m pip install --upgrade pip
     if ($LASTEXITCODE -ne 0) {
-        throw "No se pudo actualizar pip en el entorno de ScribeFloat Premium."
+        throw "No se pudo actualizar pip en el entorno de Whisper Solution."
     }
 
     & $venvPython -m pip install -r (Join-Path $AppDir "requirements.txt")
     if ($LASTEXITCODE -ne 0) {
-        throw "No se pudieron instalar las dependencias de ScribeFloat Premium."
+        throw "No se pudieron instalar las dependencias de Whisper Solution."
     }
 
     & $venvPython -m pip uninstall --yes customtkinter pystray Pillow | Out-Null
     if ($LASTEXITCODE -ne 0) {
-        throw "No se pudo retirar la interfaz anterior de ScribeFloat Premium."
+        throw "No se pudo retirar la interfaz anterior de Whisper Solution."
     }
 
     return $venvPython
@@ -124,12 +124,13 @@ function New-Shortcut($Path, $Target, $Arguments, $WorkingDirectory) {
     $shortcut.TargetPath = $Target
     $shortcut.Arguments = $Arguments
     $shortcut.WorkingDirectory = $WorkingDirectory
-    $shortcut.Description = "ScribeFloat Premium"
+    $shortcut.Description = "Whisper Solution"
+    $shortcut.IconLocation = Join-Path $AppDir "assets\icons\whisper-solution.ico"
     $shortcut.Save()
 }
 
 Write-Host "=========================================="
-Write-Host " Instalando ScribeFloat Premium Python + GPU"
+Write-Host " Instalando Whisper Solution Python + GPU"
 Write-Host "=========================================="
 Write-Host "Instalacion por usuario: no requiere permisos de administrador."
 

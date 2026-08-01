@@ -32,9 +32,18 @@ for distribution in ("faster-whisper", "ctranslate2", "sounddevice", "pygame"):
 # CTranslate2's Windows wheel supports GPU execution but CUDA/cuDNN are
 # external runtime libraries. Keep them beside the executable so a clean
 # installation has the same GPU runtime as the development environment.
-nvidia_root = Path(site.getsitepackages()[0]) / "nvidia"
+nvidia_root = next(
+    (Path(package_dir) / "nvidia" for package_dir in site.getsitepackages()
+     if (Path(package_dir) / "nvidia").is_dir()),
+    None,
+)
+if nvidia_root is None:
+    raise RuntimeError("No se encontro el runtime NVIDIA dentro del entorno de build")
 for relative_dir in ("cublas/bin", "cuda_runtime/bin", "cudnn/bin"):
-    binaries += [(str(dll), ".") for dll in (nvidia_root / relative_dir).glob("*.dll")]
+    dlls = list((nvidia_root / relative_dir).glob("*.dll"))
+    if not dlls:
+        raise RuntimeError(f"No se encontraron DLLs NVIDIA en {nvidia_root / relative_dir}")
+    binaries += [(str(dll), ".") for dll in dlls]
 
 
 a = Analysis(
@@ -64,7 +73,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="ScribeFloat-Premium",
+    name="Whisper-Solution",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -75,6 +84,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon="assets/icons/whisper-solution.ico",
     contents_directory=".",
 )
 
@@ -85,5 +95,5 @@ coll = COLLECT(
     strip=False,
     upx=False,
     upx_exclude=[],
-    name="ScribeFloat-Premium",
+    name="Whisper-Solution",
 )

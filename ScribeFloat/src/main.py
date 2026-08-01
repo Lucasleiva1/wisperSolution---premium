@@ -1,4 +1,4 @@
-"""ScribeFloat Premium desktop UI built with PySide6."""
+"""Whisper Solution desktop UI built with PySide6."""
 
 import ctypes
 import math
@@ -25,6 +25,7 @@ from PySide6.QtCore import (
     QRectF,
     Qt,
     QTimer,
+    QVariantAnimation,
     Signal,
     Slot,
     QObject,
@@ -37,7 +38,6 @@ from PySide6.QtGui import (
     QPainter,
     QPainterPath,
     QPen,
-    QPixmap,
     QRadialGradient,
 )
 from PySide6.QtWidgets import (
@@ -85,7 +85,7 @@ def _configure_runtime_log():
     if not getattr(sys, "frozen", False) or RUNTIME_LOG_HANDLE is not None:
         return
     try:
-        log_path = APP_DIR / "scribefloat-runtime.log"
+        log_path = APP_DIR / "whisper-solution-runtime.log"
         RUNTIME_LOG_HANDLE = open(log_path, "a", encoding="utf-8", buffering=1)
         sys.stdout = RUNTIME_LOG_HANDLE
         sys.stderr = RUNTIME_LOG_HANDLE
@@ -133,7 +133,7 @@ def _acquire_single_instance():
     kernel32.CloseHandle.argtypes = (ctypes.c_void_p,)
     kernel32.CloseHandle.restype = ctypes.c_bool
 
-    handle = kernel32.CreateMutexW(None, True, "Local\\ScribeFloatPremiumSingleInstance")
+    handle = kernel32.CreateMutexW(None, True, "Local\\WhisperSolutionSingleInstance")
     if not handle:
         return True
     if ctypes.get_last_error() == 183:
@@ -212,32 +212,15 @@ def _place_settings_dialog(dialog, anchor):
 
 
 def _make_app_icon():
-    pixmap = QPixmap(64, 64)
-    pixmap.fill(Qt.transparent)
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.Antialiasing)
-    painter.setPen(QPen(_color("#1a2a58", 210), 7))
-    painter.drawEllipse(QRectF(6, 6, 52, 52))
-    gradient = QLinearGradient(10, 15, 55, 48)
-    gradient.setColorAt(0, _color("#ea48ff"))
-    gradient.setColorAt(0.55, _color("#527dff"))
-    gradient.setColorAt(1, _color("#23dbff"))
-    painter.setPen(QPen(gradient, 3))
-    painter.drawEllipse(QRectF(7, 7, 50, 50))
-    painter.setPen(QPen(_color("#d9e9ff"), 3, Qt.SolidLine, Qt.RoundCap))
-    painter.drawLine(QPointF(21, 34), QPointF(21, 30))
-    painter.drawLine(QPointF(28, 39), QPointF(28, 25))
-    painter.drawLine(QPointF(35, 42), QPointF(35, 22))
-    painter.drawLine(QPointF(42, 36), QPointF(42, 28))
-    painter.end()
-    return QIcon(pixmap)
+    """Load the shared brand icon used by the app, executable and installer."""
+    return QIcon(str(ASSETS_DIR / "icons" / "whisper-solution-icon.png"))
 
 
 def _set_windows_app_id():
     if os.name == "nt":
         try:
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
-                "ScribeFloat.Premium.Desktop"
+                "WhisperSolution.Desktop"
             )
         except Exception:
             pass
@@ -290,6 +273,7 @@ class PremiumPanel(QWidget):
     clear_requested = Signal()
     settings_requested = Signal()
     minimize_requested = Signal()
+    capsule_requested = Signal()
     close_requested = Signal()
     language_selected = Signal(str)
     position_changed = Signal(QPoint)
@@ -301,7 +285,7 @@ class PremiumPanel(QWidget):
         self._allow_close = False
         self._ignore_restore_requests = False
         self._window_transition_token = 0
-        self.setWindowTitle("ScribeFloat Premium")
+        self.setWindowTitle("Whisper Solution")
         self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setFixedSize(508, 584)
@@ -318,7 +302,7 @@ class PremiumPanel(QWidget):
         header = QHBoxLayout()
         title_group = QVBoxLayout()
         title_group.setSpacing(1)
-        brand = QLabel("SCRIBEFLOAT  /  PREMIUM")
+        brand = QLabel("WHISPER SOLUTION")
         brand.setObjectName("brand")
         tagline = QLabel("VOICE CAPTURE  /  PREMIUM DESKTOP")
         tagline.setObjectName("tagline")
@@ -326,6 +310,12 @@ class PremiumPanel(QWidget):
         title_group.addWidget(tagline)
         header.addLayout(title_group)
         header.addStretch()
+        capsule_button = QPushButton("MODO CAPSULA")
+        capsule_button.setObjectName("capsuleModeButton")
+        capsule_button.setFixedSize(102, 31)
+        capsule_button.setToolTip("Pasar a la vista compacta")
+        capsule_button.clicked.connect(self.capsule_requested.emit)
+        header.addWidget(capsule_button)
         for text, callback, width, tooltip in (
             ("-", self.minimize_requested.emit, 31, "Minimizar"),
             ("x", self.close_requested.emit, 31, "Cerrar"),
@@ -459,6 +449,16 @@ class PremiumPanel(QWidget):
             color: #6b7da6; font-size: 14px;
         }
         QPushButton#windowControl:hover { background-color: rgba(40, 58, 96, 130); color: #ffffff; }
+        QPushButton#capsuleModeButton {
+            padding: 0 9px; border-radius: 15px;
+            color: #b9d9ff; font-size: 8px; font-weight: 700;
+            background-color: rgba(16, 36, 72, 210);
+            border: 1px solid rgba(70, 132, 215, 170);
+        }
+        QPushButton#capsuleModeButton:hover {
+            color: #ffffff; border-color: rgba(55, 217, 255, 225);
+            background-color: rgba(22, 53, 100, 235);
+        }
         QPushButton#settingsControl {
             padding: 0 10px; border-radius: 15px;
             color: #a8c8ff; font-size: 9px; font-weight: 700;
@@ -620,11 +620,12 @@ class CapsuleSurface(QWidget):
 
 class ListeningCapsule(QWidget):
     expand_requested = Signal()
+    record_requested = Signal()
     position_changed = Signal(QPoint)
 
     def __init__(self, config):
         super().__init__()
-        self.setWindowTitle("ScribeFloat Premium - Listening")
+        self.setWindowTitle("Whisper Solution - Capsula")
         self.setWindowFlags(
             Qt.FramelessWindowHint
             | Qt.WindowStaysOnTopHint
@@ -647,6 +648,7 @@ class ListeningCapsule(QWidget):
         self.wave_amplitude = 1.0
         self.wave_detail = 3
         self.microphone_scale = 1.0
+        self.microphone_hover_scale = 1.0
         self.indicator_scale = 1.0
         self.wave_width_scale = 1.0
         self._capsule_body_height = 60
@@ -669,7 +671,7 @@ class ListeningCapsule(QWidget):
         self.open_button = QToolButton()
         self.open_button.setObjectName("capsuleOpen")
         self.open_button.setText("ABRIR")
-        self.open_button.setToolTip("Abrir ScribeFloat Premium")
+        self.open_button.setToolTip("Abrir Whisper Solution")
         self.open_button.setCursor(Qt.PointingHandCursor)
         self.open_button.clicked.connect(self.expand_requested.emit)
         controls_layout.addWidget(self.open_button)
@@ -687,6 +689,31 @@ class ListeningCapsule(QWidget):
         self.controls_animation.addAnimation(self.controls_slide_animation)
         self.controls_animation.finished.connect(self._controls_animation_finished)
         self.capsule_surface = CapsuleSurface(self)
+        self.microphone_button = QToolButton(self)
+        self.microphone_button.setObjectName("capsuleMicrophone")
+        self.microphone_button.setCursor(Qt.PointingHandCursor)
+        self.microphone_button.setFocusPolicy(Qt.NoFocus)
+        self.microphone_button.setAccessibleName("Iniciar grabacion")
+        self.microphone_button.setToolTip("Iniciar grabacion")
+        self.microphone_button.installEventFilter(self)
+        self.microphone_button.setStyleSheet(
+            """
+            QToolButton#capsuleMicrophone {
+                background: transparent; border: none; padding: 0;
+            }
+            QToolButton#capsuleMicrophone:hover {
+                background: transparent; border: none;
+            }
+            QToolButton#capsuleMicrophone:pressed {
+                background: transparent; border: none;
+            }
+            """
+        )
+        self.microphone_button.clicked.connect(self.record_requested.emit)
+        self.microphone_hover_animation = QVariantAnimation(self)
+        self.microphone_hover_animation.setDuration(120)
+        self.microphone_hover_animation.setEasingCurve(QEasingCurve.OutCubic)
+        self.microphone_hover_animation.valueChanged.connect(self._set_microphone_hover_scale)
         self._position_controls()
         self.controls.hide()
 
@@ -699,6 +726,31 @@ class ListeningCapsule(QWidget):
         if hasattr(self, "controls"):
             self._position_controls()
         super().resizeEvent(event)
+
+    def eventFilter(self, watched, event):
+        if watched is self.microphone_button:
+            if event.type() == QEvent.Enter:
+                self._animate_microphone_hover(1.10)
+            elif event.type() == QEvent.Leave:
+                self._animate_microphone_hover(1.0)
+            elif event.type() == QEvent.MouseButtonPress:
+                self._animate_microphone_hover(0.97, duration=70)
+            elif event.type() == QEvent.MouseButtonRelease:
+                self._animate_microphone_hover(1.10 if self.microphone_button.underMouse() else 1.0, duration=90)
+        return super().eventFilter(watched, event)
+
+    def _animate_microphone_hover(self, target, duration=120):
+        if not hasattr(self, "microphone_hover_animation"):
+            return
+        self.microphone_hover_animation.stop()
+        self.microphone_hover_animation.setDuration(duration)
+        self.microphone_hover_animation.setStartValue(self.microphone_hover_scale)
+        self.microphone_hover_animation.setEndValue(target)
+        self.microphone_hover_animation.start()
+
+    def _set_microphone_hover_scale(self, value):
+        self.microphone_hover_scale = float(value)
+        self._update_capsule_visual()
 
     def _position_controls(self):
         if hasattr(self, "controls_animation"):
@@ -725,6 +777,16 @@ class ListeningCapsule(QWidget):
             )
             self.capsule_surface.raise_()
             self.capsule_surface.update()
+        if hasattr(self, "microphone_button"):
+            hit_size = max(28, round(28 * self.microphone_scale))
+            center = QPoint(24, self._capsule_body_height // 2)
+            self.microphone_button.setGeometry(
+                center.x() - (hit_size // 2),
+                center.y() - (hit_size // 2),
+                hit_size,
+                hit_size,
+            )
+            self.microphone_button.raise_()
 
     def _keep_inside_screen(self):
         if not self.isVisible():
@@ -816,6 +878,10 @@ class ListeningCapsule(QWidget):
 
     def set_recording(self, active):
         self.recording = active
+        if hasattr(self, "microphone_button"):
+            action = "Detener grabacion" if active else "Iniciar grabacion"
+            self.microphone_button.setToolTip(action)
+            self.microphone_button.setAccessibleName(action)
         if not active:
             self.target_level = 0.0
             self.target_envelope = [0.0] * 64
@@ -986,7 +1052,8 @@ class ListeningCapsule(QWidget):
         center = QPointF(body.left() + 17, body.center().y())
         painter.save()
         painter.translate(center)
-        painter.scale(self.microphone_scale, self.microphone_scale)
+        visual_scale = self.microphone_scale * self.microphone_hover_scale
+        painter.scale(visual_scale, visual_scale)
         painter.setBrush(Qt.NoBrush)
         painter.setPen(QPen(_color("#d9e9ff", 206), 1.25, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
         capsule = QRectF(-3.25, -7.5, 6.5, 11.5)
@@ -1177,11 +1244,13 @@ class ScribeFloatController(QObject):
         self.panel.clear_requested.connect(self._clear)
         self.panel.settings_requested.connect(self._open_settings)
         self.panel.minimize_requested.connect(self._minimize_panel)
+        self.panel.capsule_requested.connect(self._minimize_panel)
         self.panel.close_requested.connect(self.shutdown)
         self.panel.language_selected.connect(self._change_language)
         self.panel.position_changed.connect(lambda point: self._save_position("panel_position", point))
         self.panel.restore_requested.connect(self._restore_from_capsule)
         self.capsule.expand_requested.connect(self._restore_from_capsule)
+        self.capsule.record_requested.connect(self.toggle_recording)
         self.capsule.position_changed.connect(lambda point: self._save_position("capsule_position", point))
         self.toggle_from_thread.connect(self.toggle_recording)
         self.audio_from_thread.connect(self._receive_audio_visual)
@@ -1697,7 +1766,7 @@ class ScribeFloatController(QObject):
         answer = QMessageBox.question(
             self.settings_dialog,
             "Actualizacion disponible",
-            f"Esta disponible ScribeFloat Premium {update['version']}.\n\n"
+            f"Esta disponible Whisper Solution {update['version']}.\n\n"
             "¿Queres descargar ahora el instalador verificado?",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.Yes,
@@ -1737,7 +1806,7 @@ class ScribeFloatController(QObject):
             self.settings_dialog,
             "Instalar actualizacion",
             "La descarga paso la verificacion SHA-256.\n\n"
-            "¿Queres cerrar ScribeFloat e instalarla ahora?",
+            "¿Queres cerrar Whisper Solution e instalarla ahora?",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.Yes,
         )
@@ -1831,15 +1900,15 @@ def _verify_packaged_resources():
 
 
 def main():
-    _configure_runtime_log()
     if "--verify-package" in sys.argv:
         return _verify_packaged_resources()
+    _configure_runtime_log()
     if not _acquire_single_instance():
         return 0
     _set_windows_app_id()
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
-    app.setApplicationName("ScribeFloat Premium")
+    app.setApplicationName("Whisper Solution")
     app.setWindowIcon(_make_app_icon())
     controller = ScribeFloatController(app)
     app._scribefloat_controller = controller

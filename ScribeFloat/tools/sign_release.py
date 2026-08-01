@@ -1,4 +1,4 @@
-"""Sign a ScribeFloat installer digest with the protected Ed25519 release key."""
+"""Sign a Whisper Solution installer digest with the protected Ed25519 release key."""
 
 import argparse
 import base64

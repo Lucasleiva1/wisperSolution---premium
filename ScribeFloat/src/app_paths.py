@@ -1,4 +1,4 @@
-"""Filesystem locations owned by this ScribeFloat Premium copy."""
+"""Filesystem locations owned by this Whisper Solution copy."""
 
 import sys
 from pathlib import Path

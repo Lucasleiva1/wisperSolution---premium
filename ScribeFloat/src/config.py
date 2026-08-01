@@ -1,4 +1,4 @@
-"""ScribeFloat Premium - Configuracion persistente."""
+"""Whisper Solution - Configuracion persistente."""
 import json
 
 from app_paths import CONFIG_FILE

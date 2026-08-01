@@ -1,5 +1,5 @@
 """
-ScribeFloat Premium - Utilidades
+Whisper Solution - Utilidades
 Funciones de limpieza de texto, guardado y post-procesado.
 """
 
@@ -35,12 +35,12 @@ def save_transcription(text: str, export_dir: str = "exports", filename: str = N
     filepath = os.path.join(export_dir, filename)
     
     with open(filepath, "w", encoding="utf-8") as f:
-        f.write(f"--- ScribeFloat Premium - Transcripcion ---\n")
+        f.write(f"--- Whisper Solution - Transcripcion ---\n")
         f.write(f"Fecha: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
         f.write(f"{'=' * 40}\n\n")
         f.write(text)
         f.write(f"\n\n{'=' * 40}\n")
-        f.write(f"--- Fin de transcripcion - ScribeFloat Premium ---\n")
+        f.write(f"--- Fin de transcripcion - Whisper Solution ---\n")
     
     return filepath
 
