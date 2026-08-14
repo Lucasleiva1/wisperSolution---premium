@@ -34,4 +34,30 @@ if (-not (Test-Path -LiteralPath $setupExe)) {
     throw "No se genero el instalador: $setupExe"
 }
 
-Write-Host "Instalador listo: $setupExe" -ForegroundColor Green
+$legacySetupExe = Join-Path $projectDir "release_pyinstaller\ScribeFloat-Premium-Setup.exe"
+if (Test-Path -LiteralPath $legacySetupExe) {
+    Remove-Item -LiteralPath $legacySetupExe -Force
+}
+try {
+    New-Item -ItemType HardLink -Path $legacySetupExe -Target $setupExe -ErrorAction Stop | Out-Null
+} catch {
+    Copy-Item -LiteralPath $setupExe -Destination $legacySetupExe -Force
+}
+
+foreach ($asset in @($setupExe, $legacySetupExe)) {
+    $assetName = Split-Path -Leaf $asset
+    $hash = (Get-FileHash -LiteralPath $asset -Algorithm SHA256).Hash.ToLowerInvariant()
+    Set-Content -LiteralPath "$asset.sha256" -Value "$hash  $assetName" -Encoding ascii
+
+    & $pythonExe (Join-Path $projectDir "tools\sign_release.py") $asset
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath "$asset.sig")) {
+        throw "No se pudo firmar criptograficamente $assetName"
+    }
+
+    & $pythonExe (Join-Path $projectDir "tools\verify_release.py") $asset
+    if ($LASTEXITCODE -ne 0) {
+        throw "La verificacion criptografica fallo para $assetName"
+    }
+}
+
+Write-Host "Instaladores y firmas listos en release_pyinstaller" -ForegroundColor Green

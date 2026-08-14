@@ -1,5 +1,5 @@
 #define MyAppName "Whisper Solution"
-#define MyAppVersion "1.1.2-pre.1"
+#define MyAppVersion "1.1.3"
 #define MyAppExeName "Whisper-Solution.exe"
 
 [Setup]

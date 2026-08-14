@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "1.1.2-pre.1"
+    [string]$Version = "1.1.3"
 )
 
 $ErrorActionPreference = "Stop"
@@ -29,7 +29,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 if (-not (git tag --list $Tag)) {
-    git tag -a $Tag -m "Whisper Solution $Version PRE-FINAL"
+    git tag -a $Tag -m "Whisper Solution $Version"
 }
 
 git push origin main
@@ -38,9 +38,9 @@ git push origin $Tag
 $ExistingRelease = gh release view $Tag 2>$null
 if ($LASTEXITCODE -eq 0) {
     gh release upload $Tag $Installer $Checksum $Signature $LegacyInstaller $LegacyChecksum $LegacySignature --clobber
-    gh release edit $Tag --title "Whisper Solution $Version - PRE-FINAL" --notes-file $Notes --latest
+    gh release edit $Tag --title "Whisper Solution $Version" --notes-file $Notes --latest
 } else {
-    gh release create $Tag $Installer $Checksum $Signature $LegacyInstaller $LegacyChecksum $LegacySignature --title "Whisper Solution $Version - PRE-FINAL" --notes-file $Notes --latest
+    gh release create $Tag $Installer $Checksum $Signature $LegacyInstaller $LegacyChecksum $LegacySignature --title "Whisper Solution $Version" --notes-file $Notes --latest
 }
 
 if ($LASTEXITCODE -ne 0) {

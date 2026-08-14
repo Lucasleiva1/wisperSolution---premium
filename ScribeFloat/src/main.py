@@ -1,6 +1,7 @@
 """Whisper Solution desktop UI built with PySide6."""
 
 import ctypes
+from ctypes import wintypes
 import math
 import os
 import queue
@@ -75,8 +76,44 @@ LANGS = {
 }
 START_SOUND_DELAY_MS = 350
 WINDOW_TRANSITION_GUARD_MS = 120
+TOPMOST_GUARD_INTERVAL_MS = 750
 SINGLE_INSTANCE_MUTEX = None
 RUNTIME_LOG_HANDLE = None
+
+WINDOWS_USER32 = None
+if os.name == "nt":
+    WINDOWS_USER32 = ctypes.WinDLL("user32", use_last_error=True)
+    WINDOWS_USER32.GetWindowLongW.argtypes = (wintypes.HWND, ctypes.c_int)
+    WINDOWS_USER32.GetWindowLongW.restype = ctypes.c_long
+    WINDOWS_USER32.SetWindowLongW.argtypes = (
+        wintypes.HWND,
+        ctypes.c_int,
+        ctypes.c_long,
+    )
+    WINDOWS_USER32.SetWindowLongW.restype = ctypes.c_long
+    WINDOWS_USER32.SetWindowPos.argtypes = (
+        wintypes.HWND,
+        wintypes.HWND,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        wintypes.UINT,
+    )
+    WINDOWS_USER32.SetWindowPos.restype = wintypes.BOOL
+
+GWL_EXSTYLE = -20
+WS_EX_TOPMOST = 0x00000008
+WS_EX_TOOLWINDOW = 0x00000080
+WS_EX_APPWINDOW = 0x00040000
+WS_EX_NOACTIVATE = 0x08000000
+SWP_NOSIZE = 0x0001
+SWP_NOMOVE = 0x0002
+SWP_NOZORDER = 0x0004
+SWP_NOACTIVATE = 0x0010
+SWP_FRAMECHANGED = 0x0020
+SWP_NOOWNERZORDER = 0x0200
+HWND_TOPMOST = ctypes.c_void_p(-1)
 
 
 def _configure_runtime_log():
@@ -162,22 +199,51 @@ def _make_no_activate(widget):
     widget.setAttribute(Qt.WA_ShowWithoutActivating, True)
     if os.name != "nt":
         return
-    hwnd = int(widget.winId())
-    user32 = ctypes.windll.user32
-    style = user32.GetWindowLongW(hwnd, -20)
-    user32.SetWindowLongW(hwnd, -20, style | 0x08000000 | 0x00000080)
+    hwnd = wintypes.HWND(int(widget.winId()))
+    style = WINDOWS_USER32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+    WINDOWS_USER32.SetWindowLongW(
+        hwnd,
+        GWL_EXSTYLE,
+        style | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
+    )
 
 
 def _ensure_taskbar_window(widget):
     """Expose only the primary panel as a normal Windows taskbar window."""
     if os.name != "nt":
         return
-    hwnd = int(widget.winId())
-    user32 = ctypes.windll.user32
-    style = user32.GetWindowLongW(hwnd, -20)
-    style = (style & ~0x00000080) | 0x00040000  # No ToolWindow; force AppWindow.
-    user32.SetWindowLongW(hwnd, -20, style)
-    user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0x0037)
+    hwnd = wintypes.HWND(int(widget.winId()))
+    style = WINDOWS_USER32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+    style = (style & ~WS_EX_TOOLWINDOW) | WS_EX_APPWINDOW
+    WINDOWS_USER32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
+    WINDOWS_USER32.SetWindowPos(
+        hwnd,
+        None,
+        0,
+        0,
+        0,
+        0,
+        SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+    )
+
+
+def _enforce_always_on_top(widget, force=False):
+    """Keep a visible overlay in Windows' native TOPMOST z-order band."""
+    if os.name != "nt" or not widget.isVisible():
+        return
+    hwnd = wintypes.HWND(int(widget.winId()))
+    style = WINDOWS_USER32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+    if not force and style & WS_EX_TOPMOST:
+        return
+    WINDOWS_USER32.SetWindowPos(
+        hwnd,
+        HWND_TOPMOST,
+        0,
+        0,
+        0,
+        0,
+        SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOOWNERZORDER,
+    )
 
 
 def _inside_any_screen(position, size):
@@ -621,6 +687,7 @@ class CapsuleSurface(QWidget):
 class ListeningCapsule(QWidget):
     expand_requested = Signal()
     record_requested = Signal()
+    close_requested = Signal()
     position_changed = Signal(QPoint)
 
     def __init__(self, config):
@@ -650,6 +717,7 @@ class ListeningCapsule(QWidget):
         self.microphone_scale = 1.0
         self.microphone_hover_scale = 1.0
         self.indicator_scale = 1.0
+        self.close_hover_amount = 0.0
         self.wave_width_scale = 1.0
         self._capsule_body_height = 60
         self._control_zone_height = 34
@@ -689,6 +757,11 @@ class ListeningCapsule(QWidget):
         self.controls_animation.addAnimation(self.controls_slide_animation)
         self.controls_animation.finished.connect(self._controls_animation_finished)
         self.capsule_surface = CapsuleSurface(self)
+        self.wave_hover_zone = QWidget(self)
+        self.wave_hover_zone.setObjectName("capsuleWaveHoverZone")
+        self.wave_hover_zone.setMouseTracking(True)
+        self.wave_hover_zone.setStyleSheet("background: transparent; border: none;")
+        self.wave_hover_zone.installEventFilter(self)
         self.microphone_button = QToolButton(self)
         self.microphone_button.setObjectName("capsuleMicrophone")
         self.microphone_button.setCursor(Qt.PointingHandCursor)
@@ -714,6 +787,31 @@ class ListeningCapsule(QWidget):
         self.microphone_hover_animation.setDuration(120)
         self.microphone_hover_animation.setEasingCurve(QEasingCurve.OutCubic)
         self.microphone_hover_animation.valueChanged.connect(self._set_microphone_hover_scale)
+        self.close_button = QToolButton(self)
+        self.close_button.setObjectName("capsuleClose")
+        self.close_button.setCursor(Qt.PointingHandCursor)
+        self.close_button.setFocusPolicy(Qt.NoFocus)
+        self.close_button.setAccessibleName("Cerrar")
+        self.close_button.setToolTip("Cerrar")
+        self.close_button.installEventFilter(self)
+        self.close_button.setStyleSheet(
+            """
+            QToolButton#capsuleClose {
+                background: transparent; border: none; padding: 0;
+            }
+            QToolButton#capsuleClose:hover {
+                background: transparent; border: none;
+            }
+            QToolButton#capsuleClose:pressed {
+                background: transparent; border: none;
+            }
+            """
+        )
+        self.close_button.clicked.connect(self.close_requested.emit)
+        self.close_hover_animation = QVariantAnimation(self)
+        self.close_hover_animation.setDuration(140)
+        self.close_hover_animation.setEasingCurve(QEasingCurve.OutCubic)
+        self.close_hover_animation.valueChanged.connect(self._set_close_hover_amount)
         self._position_controls()
         self.controls.hide()
 
@@ -737,6 +835,16 @@ class ListeningCapsule(QWidget):
                 self._animate_microphone_hover(0.97, duration=70)
             elif event.type() == QEvent.MouseButtonRelease:
                 self._animate_microphone_hover(1.10 if self.microphone_button.underMouse() else 1.0, duration=90)
+        elif watched is self.close_button:
+            if event.type() == QEvent.Enter:
+                self._animate_close_hover(1.0)
+            elif event.type() == QEvent.Leave:
+                self._animate_close_hover(0.0)
+        elif watched is self.wave_hover_zone:
+            if event.type() == QEvent.Enter:
+                self._animate_controls(True)
+            elif event.type() == QEvent.Leave:
+                self._schedule_controls_hide()
         return super().eventFilter(watched, event)
 
     def _animate_microphone_hover(self, target, duration=120):
@@ -750,6 +858,18 @@ class ListeningCapsule(QWidget):
 
     def _set_microphone_hover_scale(self, value):
         self.microphone_hover_scale = float(value)
+        self._update_capsule_visual()
+
+    def _animate_close_hover(self, target):
+        if not hasattr(self, "close_hover_animation"):
+            return
+        self.close_hover_animation.stop()
+        self.close_hover_animation.setStartValue(self.close_hover_amount)
+        self.close_hover_animation.setEndValue(target)
+        self.close_hover_animation.start()
+
+    def _set_close_hover_amount(self, value):
+        self.close_hover_amount = float(value)
         self._update_capsule_visual()
 
     def _position_controls(self):
@@ -787,6 +907,28 @@ class ListeningCapsule(QWidget):
                 hit_size,
             )
             self.microphone_button.raise_()
+        if hasattr(self, "close_button"):
+            hit_size = max(28, round(28 * self.indicator_scale))
+            center = QPoint(self.width() - 23, self._capsule_body_height // 2)
+            self.close_button.setGeometry(
+                center.x() - (hit_size // 2),
+                center.y() - (hit_size // 2),
+                hit_size,
+                hit_size,
+            )
+            self.close_button.raise_()
+        if hasattr(self, "wave_hover_zone"):
+            left = self.microphone_button.geometry().right() + 1
+            right = self.close_button.geometry().left() - 1
+            self.wave_hover_zone.setGeometry(
+                left,
+                7,
+                max(1, right - left + 1),
+                max(1, self._capsule_body_height - 14),
+            )
+            self.wave_hover_zone.raise_()
+            self.microphone_button.raise_()
+            self.close_button.raise_()
 
     def _keep_inside_screen(self):
         if not self.isVisible():
@@ -947,12 +1089,20 @@ class ListeningCapsule(QWidget):
         if self.controls_effect.opacity() <= 0.01:
             self.controls.hide()
 
+    def _controls_hover_active(self):
+        return self.wave_hover_zone.underMouse() or self.controls.underMouse()
+
+    def _schedule_controls_hide(self):
+        QTimer.singleShot(
+            100,
+            lambda: self._animate_controls(False) if not self._controls_hover_active() else None,
+        )
+
     def enterEvent(self, event):
-        self._animate_controls(True)
         super().enterEvent(event)
 
     def leaveEvent(self, event):
-        QTimer.singleShot(100, lambda: self._animate_controls(False) if not self.underMouse() else None)
+        self._schedule_controls_hide()
         super().leaveEvent(event)
 
     def mousePressEvent(self, event):
@@ -1076,14 +1226,17 @@ class ListeningCapsule(QWidget):
 
     def _draw_activity_indicator(self, painter, body):
         listening = self.recording
-        scale = self.indicator_scale
+        close_hover = self.close_hover_amount
+        scale = self.indicator_scale * (1.0 + (0.12 * close_hover))
         center = QPointF(body.right() - 16, body.center().y())
-        halo_radius = (9.2 if listening else 5.2) * scale
+        active_color = QColor("#44ff88") if listening else QColor("#e0efff")
+        indicator_color = _blend(active_color, QColor("#ff365f"), close_hover)
+        halo_radius = (9.2 if listening else 5.2 + (3.2 * close_hover)) * scale
         halo = QRadialGradient(center, halo_radius)
-        if listening:
-            halo.setColorAt(0, _color("#44ff88", 160))
-            halo.setColorAt(0.22, _color("#44ff88", 74))
-            halo.setColorAt(1, _color("#44ff88", 0))
+        if listening or close_hover > 0.0:
+            halo.setColorAt(0, _color(indicator_color.name(), int(160 + (40 * close_hover))))
+            halo.setColorAt(0.22, _color(indicator_color.name(), int(74 + (38 * close_hover))))
+            halo.setColorAt(1, _color(indicator_color.name(), 0))
         else:
             halo.setColorAt(0, _color("#e0efff", 36))
             halo.setColorAt(1, _color("#e0efff", 0))
@@ -1092,10 +1245,10 @@ class ListeningCapsule(QWidget):
         painter.drawEllipse(center, halo_radius, halo_radius)
 
         painter.setBrush(Qt.NoBrush)
-        if listening:
-            painter.setPen(QPen(_color("#44ff88", 92), 0.85))
+        if listening or close_hover > 0.0:
+            painter.setPen(QPen(_color(indicator_color.name(), int(92 + (70 * close_hover))), 0.85))
             painter.drawEllipse(center, 7.8 * scale, 7.8 * scale)
-            painter.setPen(QPen(_color("#44ff88", 46), 0.8))
+            painter.setPen(QPen(_color(indicator_color.name(), int(46 + (38 * close_hover))), 0.8))
             painter.drawEllipse(center, 10.8 * scale, 10.8 * scale)
         else:
             painter.setPen(Qt.NoPen)
@@ -1103,8 +1256,8 @@ class ListeningCapsule(QWidget):
             painter.drawEllipse(center, 3.25 * scale, 3.25 * scale)
 
         painter.setPen(Qt.NoPen)
-        painter.setBrush(_color("#44ff88", 238) if listening else _color("#e0efff", 104))
-        radius = (2.85 if listening else 1.75) * scale
+        painter.setBrush(_color(indicator_color.name(), 238 if listening or close_hover > 0.0 else 104))
+        radius = (2.85 if listening or close_hover > 0.0 else 1.75) * scale
         painter.drawEllipse(center, radius, radius)
 
     def _draw_wave(self, painter, body):
@@ -1221,6 +1374,11 @@ class ScribeFloatController(QObject):
         self.capsule.set_status("LISTO")
         self._show_capsule()
 
+        self._topmost_guard_timer = QTimer(self)
+        self._topmost_guard_timer.setInterval(TOPMOST_GUARD_INTERVAL_MS)
+        self._topmost_guard_timer.timeout.connect(self._guard_visible_window_topmost)
+        self._topmost_guard_timer.start()
+
         self._segment_worker_thread = threading.Thread(target=self._segment_worker, daemon=True)
         self._segment_worker_thread.start()
         self._sounds_enabled = False
@@ -1251,6 +1409,7 @@ class ScribeFloatController(QObject):
         self.panel.restore_requested.connect(self._restore_from_capsule)
         self.capsule.expand_requested.connect(self._restore_from_capsule)
         self.capsule.record_requested.connect(self.toggle_recording)
+        self.capsule.close_requested.connect(self.shutdown)
         self.capsule.position_changed.connect(lambda point: self._save_position("capsule_position", point))
         self.toggle_from_thread.connect(self.toggle_recording)
         self.audio_from_thread.connect(self._receive_audio_visual)
@@ -1283,6 +1442,13 @@ class ScribeFloatController(QObject):
     def _save_position(self, key, position):
         self.cfg[key] = [position.x(), position.y()]
         save_config(self.cfg)
+
+    def _guard_visible_window_topmost(self):
+        """Recover if a shell/display transition drops the native topmost state."""
+        _enforce_always_on_top(self.capsule)
+        _enforce_always_on_top(self.panel)
+        if self.settings_dialog and self.settings_dialog.isVisible():
+            _enforce_always_on_top(self.settings_dialog)
 
     def _set_state(self, state, message):
         self.state = state
@@ -1612,11 +1778,12 @@ class ScribeFloatController(QObject):
         self.panel.hide()
         if was_visible:
             self.capsule.setWindowOpacity(1.0)
+            _enforce_always_on_top(self.capsule, force=True)
             return
         self.capsule.setWindowOpacity(0.0)
         self.capsule.show()
         _make_no_activate(self.capsule)
-        self.capsule.raise_()
+        _enforce_always_on_top(self.capsule, force=True)
         animation = QPropertyAnimation(self.capsule, b"windowOpacity", self)
         animation.setStartValue(0.0)
         animation.setEndValue(1.0)
@@ -1635,9 +1802,7 @@ class ScribeFloatController(QObject):
         if not was_visible:
             self.panel.show_normal_from_controller()
             _ensure_taskbar_window(self.panel)
-            self.panel.raise_()
-        elif not passive:
-            self.panel.raise_()
+        _enforce_always_on_top(self.panel, force=True)
         if not passive:
             self.panel.activateWindow()
 
@@ -1689,7 +1854,7 @@ class ScribeFloatController(QObject):
                 self.capsule.move(panel_rect.left(), panel_rect.bottom() + 10)
                 self.capsule.show()
                 _make_no_activate(self.capsule)
-                self.capsule.raise_()
+                _enforce_always_on_top(self.capsule, force=True)
             self.capsule.set_status("VISTA PREVIA")
             self.capsule.set_previewing(True)
         self.settings_dialog = SettingsPanel(

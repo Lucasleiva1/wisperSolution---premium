@@ -1,13 +1,13 @@
 $ErrorActionPreference = "Stop"
 
-$AppVersion = "1.1.0"
+$AppVersion = "1.1.3"
 $Python = ".\venv\Scripts\python.exe"
 $BuildDir = "build_release"
 $DistDir = Join-Path $BuildDir "main.dist"
-$ExePath = Join-Path $DistDir "ScribeFloat-Premium.exe"
+$ExePath = Join-Path $DistDir "Whisper-Solution.exe"
 $InnoCompiler = "C:\Users\jaell\AppData\Local\Programs\Inno Setup 6\ISCC.exe"
 
-Write-Host "Preparando ScribeFloat Premium $AppVersion"
+Write-Host "Preparando Whisper Solution $AppVersion"
 
 if (-not (Test-Path $Python)) {
     throw "No se encontro el entorno virtual en $Python."
@@ -27,12 +27,13 @@ Write-Host "Compilando aplicacion con Nuitka (standalone)..."
     --include-package-data=faster_whisper `
     --include-data-dir=assets=assets `
     --windows-console-mode=disable `
-    --company-name="ScribeFloat" `
-    --product-name="ScribeFloat Premium" `
+    --company-name="Whisper Solution" `
+    --product-name="Whisper Solution" `
     --file-description="Captura de voz premium para Windows" `
     --file-version="$AppVersion.0" `
     --product-version="$AppVersion.0" `
-    --output-filename="ScribeFloat-Premium.exe" `
+    --windows-icon-from-ico="assets\icons\whisper-solution.ico" `
+    --output-filename="Whisper-Solution.exe" `
     --output-dir=$BuildDir `
     src\main.py
 if ($LASTEXITCODE -ne 0) {
@@ -83,12 +84,12 @@ if ($LASTEXITCODE -ne 0) {
     throw "Inno Setup no pudo crear el instalador."
 }
 
-$Installer = "release\ScribeFloat-Premium-Setup.exe"
+$Installer = "release\Whisper-Solution-Setup.exe"
 if (-not (Test-Path $Installer)) {
     throw "No se genero $Installer."
 }
 $Hash = (Get-FileHash $Installer -Algorithm SHA256).Hash.ToLowerInvariant()
-Set-Content -Path "$Installer.sha256" -Value "$Hash  ScribeFloat-Premium-Setup.exe" -Encoding ascii
+Set-Content -Path "$Installer.sha256" -Value "$Hash  Whisper-Solution-Setup.exe" -Encoding ascii
 & $Python "tools\sign_release.py" $Installer
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path "$Installer.sig")) {
     throw "No se pudo firmar criptograficamente el instalador."
