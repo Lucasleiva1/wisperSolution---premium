@@ -2,6 +2,7 @@
 
 import ctypes
 from ctypes import wintypes
+import json
 import math
 import os
 import queue
@@ -76,7 +77,7 @@ LANGS = {
 }
 START_SOUND_DELAY_MS = 350
 WINDOW_TRANSITION_GUARD_MS = 120
-TOPMOST_GUARD_INTERVAL_MS = 750
+TOPMOST_GUARD_INTERVAL_MS = 250
 SINGLE_INSTANCE_MUTEX = None
 RUNTIME_LOG_HANDLE = None
 
@@ -244,6 +245,17 @@ def _enforce_always_on_top(widget, force=False):
         0,
         SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOOWNERZORDER,
     )
+
+
+def _load_sound_effects():
+    """Load the mandatory sounds using the same paths in source and installed builds."""
+    paths = {name: ASSETS_DIR / f"{name}.mp3" for name in ("start", "stop")}
+    missing = [str(path) for path in paths.values() if not path.is_file()]
+    if missing:
+        raise FileNotFoundError(f"Faltan recursos de sonido: {', '.join(missing)}")
+    pygame.mixer.init()
+    pygame.mixer.set_num_channels(4)
+    return {name: pygame.mixer.Sound(str(path)) for name, path in paths.items()}
 
 
 def _inside_any_screen(position, size):
@@ -1444,11 +1456,22 @@ class ScribeFloatController(QObject):
         save_config(self.cfg)
 
     def _guard_visible_window_topmost(self):
-        """Recover if a shell/display transition drops the native topmost state."""
-        _enforce_always_on_top(self.capsule)
-        _enforce_always_on_top(self.panel)
+        """Recover z-order even when an obscured window still has WS_EX_TOPMOST."""
+        if self._closing:
+            return
+        # Another topmost window can cover us without clearing WS_EX_TOPMOST.
+        # Reassert the native z-order without activating or moving the window.
+        _enforce_always_on_top(self.capsule, force=True)
+        _enforce_always_on_top(self.panel, force=True)
         if self.settings_dialog and self.settings_dialog.isVisible():
-            _enforce_always_on_top(self.settings_dialog)
+            _enforce_always_on_top(self.settings_dialog, force=True)
+            visual_dialog = self.settings_dialog.visual_dialog
+            if visual_dialog and visual_dialog.isVisible():
+                _enforce_always_on_top(visual_dialog, force=True)
+        # Keep modal prompts above the panel that owns them.
+        modal = self.application.activeModalWidget()
+        if modal:
+            _enforce_always_on_top(modal, force=True)
 
     def _set_state(self, state, message):
         self.state = state
@@ -1458,19 +1481,8 @@ class ScribeFloatController(QObject):
         self.capsule.set_recording(self.is_recording)
 
     def _init_sounds(self):
-        self._sound_paths = {
-            "start": self._asset_path("start.mp3"),
-            "stop": self._asset_path("stop.mp3"),
-        }
         try:
-            missing = [path for path in self._sound_paths.values() if not os.path.isfile(path)]
-            if missing:
-                raise FileNotFoundError(f"Faltan recursos de sonido: {', '.join(missing)}")
-            pygame.mixer.init()
-            pygame.mixer.set_num_channels(4)
-            self._sound_effects = {
-                name: pygame.mixer.Sound(path) for name, path in self._sound_paths.items()
-            }
+            self._sound_effects = _load_sound_effects()
             self._sounds_enabled = True
             print("[Audio] Sonidos cargados: start.mp3, stop.mp3")
         except Exception as exc:
@@ -1485,8 +1497,12 @@ class ScribeFloatController(QObject):
         if not self._sounds_enabled:
             return
         try:
-            self._sound_effects[name].play()
+            channel = self._sound_effects[name].play()
+            if channel is None:
+                channel = pygame.mixer.find_channel(force=True)
+                channel.play(self._sound_effects[name])
             print(f"[Audio] Sonido reproducido: {name}")
+            return channel
         except Exception as exc:
             print(f"[Audio] Error reproduciendo {name}: {exc}")
 
@@ -2050,24 +2066,54 @@ class ScribeFloatController(QObject):
 
 
 def _verify_packaged_resources():
-    """Exit-code based release check used after Nuitka compilation."""
+    """Require real decoding and playback, not just the presence of the MP3 files."""
+    report = {"version": APP_VERSION, "application_dir": str(APP_DIR), "sounds": {}}
     try:
-        pygame.mixer.init()
-        for filename in ("start.mp3", "stop.mp3"):
-            path = ASSETS_DIR / filename
-            if not path.is_file():
-                return 2
-            pygame.mixer.Sound(str(path))
+        import numpy as np
+        from types import SimpleNamespace
+
+        effects = _load_sound_effects()
+        player = SimpleNamespace(_sounds_enabled=True, _sound_effects=effects)
+        for name, sound in effects.items():
+            samples = pygame.sndarray.array(sound).astype(np.int32)
+            peak = int(np.max(np.abs(samples))) if samples.size else 0
+            if sound.get_length() <= 0 or peak == 0:
+                raise RuntimeError(f"Sonido vacio o silencioso: {name}")
+            channel = ScribeFloatController._play_sound(player, name)
+            if channel is None or not channel.get_busy():
+                raise RuntimeError(f"No comenzo la reproduccion: {name}")
+            deadline = time.monotonic() + sound.get_length() + 3.0
+            while channel.get_busy():
+                if time.monotonic() > deadline:
+                    raise RuntimeError(f"La reproduccion no termino: {name}")
+                time.sleep(0.02)
+            report["sounds"][name] = {"duration_seconds": sound.get_length(), "peak": peak, "playback_completed": True}
+        report["ok"] = True
+        return_code = 0
+    except Exception as exc:
+        report.update(ok=False, error=str(exc))
+        print(f"[Verify] Error: {exc}")
+        return_code = 3
+    finally:
         pygame.mixer.quit()
-        return 0
-    except Exception:
-        return 3
+    print(json.dumps(report, ensure_ascii=False))
+    if "--verification-report" in sys.argv:
+        from pathlib import Path
+        report_path = Path(sys.argv[sys.argv.index("--verification-report") + 1])
+        report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+    return return_code
 
 
 def main():
+    _configure_runtime_log()
     if "--verify-package" in sys.argv:
         return _verify_packaged_resources()
-    _configure_runtime_log()
+    if "--verify-window-topmost" in sys.argv:
+        from release_checks import verify_window_topmost
+        return verify_window_topmost(sys.modules[__name__])
+    if "--verify-backend" in sys.argv:
+        from release_checks import verify_backend
+        return verify_backend()
     if not _acquire_single_instance():
         return 0
     _set_windows_app_id()
